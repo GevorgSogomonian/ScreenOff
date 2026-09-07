@@ -1,0 +1,27 @@
+name: Build macOS app
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify safety policy
+        run: bash Scripts/test.sh
+      - name: Build and package
+        run: bash Scripts/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScreenOff-Apple-Silicon
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
