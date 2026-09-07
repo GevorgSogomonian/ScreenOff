@@ -2,7 +2,7 @@
 
 ## Automated checks
 
-`bash Scripts/test.sh` now runs 266 checks: 54 policy/lease checks, 19 popover geometry checks, and 193 checks of the production controller and persistent watchdog recovery engine with injected hardware. The latter cannot issue real display transactions.
+`bash Scripts/test.sh` now runs 286 checks: 54 policy/lease checks, 19 popover geometry checks, and 213 checks of the production controller, recovery target selection and persistent watchdog recovery engine with injected hardware. The latter cannot issue real display transactions.
 
 `bash Scripts/build.sh` compiles both executables, produces the icon and app bundle, verifies the code signature with `codesign --verify --deep --strict`, and lints Info.plist.
 
@@ -23,7 +23,20 @@ The user reported that removing the monitor cable from the Mac or dock left the 
 - `bash Scripts/test-popover.sh` passed all four native AppKit stages again. The measured gap was 2.5 points for initial show, growth, shrink and reopen with the current display configuration.
 - Before developing this fix, `--recover` successfully restored the user's disabled panel; a separate read-only diagnostic confirmed it online and active. Development and validation of 1.0.2 did not deliberately disable it again.
 
-**Physical cable removal, lid closure and sleep have not been repeated with 1.0.2.** The simulated regressions establish the corrected control flow, but final end-to-end confirmation of the reported cable-removal scenario requires testing the updated app on the user's Mac/dock.
+At the time of the 1.0.2 release, physical cable removal, lid closure and sleep had not been repeated. The subsequent physical unplug test still failed, leading to the hardware investigation and correction below. The simulated regressions alone had not established end-to-end hotplug recovery.
+
+## Version 1.0.3: recorded hardware failure and working recovery
+
+Physical unplug was reproduced with the user on this M1 Mac, with the built-in switch off and automatic mode on. Both a live AppKit observer and independent fresh diagnostic processes recorded the same result:
+
+1. Before unplugging: built-in ID 1 was offline; external ID 2 was online/active.
+2. After unplugging: ID 1 disappeared from the **private** `SLSGetDisplayList` as well. WindowServer created an active headless placeholder with vendor 1970170734/model 1986622068 (`unkn`/`virt`). An offline alias ID 3 remained, without the built-in flag.
+3. Version 1.0.2 retained its recovery obligation, but could never resolve the missing built-in target. Repeating enumeration alone could not fix this. The public `CGRestorePermanentDisplayConfiguration()` was also tested and did not restore the panel; it is not part of the fix.
+4. A restore-only diagnostic enabled the last positively identified built-in ID 1, even though it was absent from the current private list. Begin/configure/commit all returned success. ID 1 returned online/active before the external was reconnected. The user confirmed seeing the built-in screen turn on.
+
+The production fix remembers only a positively identified built-in ID in memory. A current built-in ID always wins. The remembered-ID fallback can only enable, with the lid open, no usable external, and no other current record assigned that ID. The observed virtual placeholder is excluded from usable externals. Regression tests replay the recorded topology through the real controller and watchdog recovery engine, and reject reuse for disabling, a closed lid, another physical external, conflicting IDs, and missing identity history.
+
+**Final application validation passed:** ScreenOff 1.0.3 was installed in `/Applications` and started with `--restore-on-launch`. All temporary diagnostic/recovery processes were stopped. The user then disabled the built-in with the first switch, left automatic mode enabled, and physically removed the cable. The user confirmed that the built-in turned on in the actual application. This is end-to-end confirmation of the reported scenario on this Mac/dock. Sleep, closed-lid sequences, other Macs and other docks remain separate manual checks.
 
 ## Earlier hardware validation (1.0.0)
 

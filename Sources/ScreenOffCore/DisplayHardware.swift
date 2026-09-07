@@ -17,6 +17,7 @@ final class DisplayHardware: DisplayHardwareAccess {
     private let handle: UnsafeMutableRawPointer?
     private let list: ListFn?
     private let enable: EnableFn?
+    private var recoveryTarget = BuiltInRecoveryTarget()
     let resolvedSymbol: String?
 
     init() {
@@ -84,9 +85,12 @@ final class DisplayHardware: DisplayHardwareAccess {
                                online: online.contains(id),
                                active: active.contains(id),
                                mirrored: CGDisplayIsInMirrorSet(id) != 0,
-                               hasHardwareIdentity: CGDisplayVendorNumber(id) != 0 && CGDisplayModelNumber(id) != 0)
+                               hasHardwareIdentity: DisplayHardwareIdentity.isUsableExternal(
+                                vendor: CGDisplayVendorNumber(id), model: CGDisplayModelNumber(id)))
         }
-        return DisplaySnapshot(displays: displays, lidClosed: isLidClosed())
+        let result = DisplaySnapshot(displays: displays, lidClosed: isLidClosed())
+        recoveryTarget.observe(result)
+        return result
     }
 
     private func isLidClosed() -> Bool {
@@ -97,18 +101,20 @@ final class DisplayHardware: DisplayHardwareAccess {
                                                kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool) ?? false
     }
 
-    /// Re-resolve the built-in display before EVERY transaction, including
-    /// recovery. Display IDs can change after sleep or cable reconnection.
+    /// Prefer the current built-in ID. When unplugging leaves only a headless
+    /// placeholder and hides the panel entirely, enable its last verified ID.
+    /// This fallback is never allowed for disabling a display.
     func setBuiltIn(on: Bool, recovery: Bool = false) throws {
         guard let enable, list != nil else {
             throw DisplayFailure.unavailable("SLSConfigureDisplayEnabled / SLSGetDisplayList")
         }
         let current = try snapshot()
-        guard let target = current.builtIn else { throw DisplayFailure.noBuiltIn }
+        guard let targetID = recoveryTarget.resolve(in: current, on: on, recovery: recovery)
+        else { throw DisplayFailure.noBuiltIn }
         // Online alone is insufficient during recovery (closed lid/inactive
         // panel). But re-enabling an already active panel can be rejected by
         // SkyLight as a redundant transaction. Callers verify after yielding.
-        if target.online == on && (!recovery || current.builtInIsRestored) { return }
+        if current.builtIn?.online == on && (!recovery || current.builtInIsRestored) { return }
         if !on {
             guard !current.lidClosed else { throw DisplayFailure.lidClosed }
             guard !current.externalDisplays.isEmpty else { throw DisplayFailure.noExternal }
@@ -119,7 +125,7 @@ final class DisplayHardware: DisplayHardwareAccess {
         guard begin == .success, let configuration else {
             throw DisplayFailure.system("начало переключения", begin.rawValue)
         }
-        let configured = enable(configuration, target.id, on)
+        let configured = enable(configuration, targetID, on)
         guard configured == .success else {
             CGCancelDisplayConfiguration(configuration)
             throw DisplayFailure.system("переключение дисплея", configured.rawValue)

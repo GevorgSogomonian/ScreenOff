@@ -27,7 +27,7 @@ shrinks or the built-in screen is disconnected.
 
 ## Display transaction
 
-1. Enumerate all displays again, including offline entries, and resolve the built-in by the current `CGDisplayIsBuiltin` flag.
+1. Enumerate all displays again, including offline entries, and prefer the current `CGDisplayIsBuiltin` flag. Remember a positively identified built-in ID in memory. If unplugging removes the panel entirely, `BuiltInRecoveryTarget` permits an enable-only fallback to that ID with an open lid and no usable external. Refuse a cached ID assigned to any other current record. Never use the fallback for disabling.
 2. Before disabling, check open lid, active external, and absence of mirroring.
 3. Begin configuration; dynamically call `SLSConfigureDisplayEnabled` (fallback `CGSConfigureDisplayEnabled`); cancel on configuration failure.
 4. Commit `forAppOnly` when disabling and `forSession` when restoring. Do not change brightness, gamma, resolutions, mirror relationships, or the external display's enabled flag.
@@ -38,10 +38,12 @@ Recovery uses `forSession` so its enabled setting survives the recovering proces
 
 ## Limitations
 
-WindowServer's online/active state is evidence of a usable display link, not proof that a human can see that monitor. A monitor on another input or some docks may continue reporting an active link. The app cannot detect that reliably. Entries without vendor/model identity cannot authorize disabling, and newly created placeholders cannot replace the helper's protected external UUIDs. Virtual displays that present hardware identity may still count as externals.
+WindowServer's online/active state is evidence of a usable display link, not proof that a human can see that monitor. A monitor on another input or some docks may continue reporting an active link. The app cannot detect that reliably. Entries without vendor/model identity and the observed headless placeholder (vendor `0x756E6B6E`, model `0x76697274`, ASCII `unkn`/`virt`) cannot authorize disabling. Newly created placeholders cannot replace the helper's protected external UUIDs. Other virtual displays that present hardware identity may still count as externals.
 
 Private ABI changes cannot be completely detected by symbol lookup. Verified online/offline status demonstrates a disconnect, not an electrical power measurement of the panel. The intended supported hardware is Apple Silicon MacBooks. macOS still controls physical closed-lid power behavior; ScreenOff clears its software disable and retains recovery responsibility until the lid is open and the panel is active.
 
 ## CLI
 
 `--diagnose` is read-only and emits OS version, symbol availability, and topology JSON. `--recover` tells an existing instance to suspend automation and also invokes independent recovery. `--hardware-test` exercises the guarded menu transaction for two seconds and restores it. CLI modes do not change the saved automatic preference.
+
+`--restore-on-launch` starts the menu application with a temporary manual-on choice while preserving the automatic preference. It is useful after an update or a recovery. The two menu switches retain their usual behavior.

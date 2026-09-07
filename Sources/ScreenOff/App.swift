@@ -13,9 +13,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var popoverObservers: [NSObjectProtocol] = []
     private var screenObserver: NSObjectProtocol?
     private let previewOnly: Bool
+    private let restoreOnLaunch: Bool
 
-    init(previewOnly: Bool = false) {
+    init(previewOnly: Bool = false, restoreOnLaunch: Bool = false) {
         self.previewOnly = previewOnly
+        self.restoreOnLaunch = restoreOnLaunch
         super.init()
     }
 
@@ -53,7 +55,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self?.statusItem?.button?.image = NSImage(systemSymbolName: name, accessibilityDescription: "ScreenOff")
             self?.statusItem?.button?.image?.isTemplate = true
         }
-        if !previewOnly { controller.start() }
+        if !previewOnly {
+            // A safe update/recovery launch preserves the saved automatic
+            // switch while keeping the panel on until an explicit user choice.
+            if restoreOnLaunch { controller.setBuiltIn(on: true) }
+            controller.start()
+        }
         if !controller.automatic {
             DispatchQueue.main.async { [weak self] in self?.showPopover() }
         }
@@ -187,7 +194,7 @@ enum ScreenOffApp {
             other.activate(options: [.activateIgnoringOtherApps])
             return
         }
-        let delegate = AppDelegate()
+        let delegate = AppDelegate(restoreOnLaunch: arguments.contains("--restore-on-launch"))
         app.delegate = delegate
         withExtendedLifetime(delegate) { app.run() }
     }

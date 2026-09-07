@@ -9,16 +9,28 @@ final class FakeDisplayHardware: DisplayHardwareAccess {
     var readFails = false
     var enableFails = false
     var activationDelayed = false
+    var simulateHeadlessRecovery = false
+    var recoveryTarget = BuiltInRecoveryTarget()
+    var recoveredIDs: [UInt32] = []
     var afterDisable: (() -> Void)?
     var calls: [(on: Bool, recovery: Bool)] = []
 
     init(_ state: DisplaySnapshot = fixture()) { self.state = state }
     func snapshot() throws -> DisplaySnapshot {
         if readFails { throw DisplayFailure.verification }
+        recoveryTarget.observe(state)
         return state
     }
     func setBuiltIn(on: Bool, recovery: Bool) throws {
         calls.append((on, recovery))
+        if simulateHeadlessRecovery, state.builtIn == nil,
+           let id = recoveryTarget.resolve(in: state, on: on, recovery: recovery) {
+            recoveredIDs.append(id)
+            state.displays.removeAll { !$0.hasHardwareIdentity }
+            state.displays.append(DisplayInfo(id: id, identity: "builtin", builtIn: true,
+                                             online: true, active: true, mirrored: false))
+            return
+        }
         guard state.builtIn != nil else { throw DisplayFailure.noBuiltIn }
         if on && enableFails { throw DisplayFailure.verification }
         if !on || (!state.lidClosed && !activationDelayed) {
@@ -227,7 +239,67 @@ enum RecoveryControllerTests {
                    "quit with unavailable panel hands recovery to helper via command and EOF")
         }
         testWatchdogRecovery()
+        await testRecordedHotplug()
         print("PASS: \(checks) controller and persistent-recovery checks (simulated hardware only)")
+    }
+
+    static func recordedHeadlessState() -> DisplaySnapshot {
+        // Exact topology shape observed during the failed physical unplug:
+        // no ID 1, one active "unkn"/"virt" placeholder, offline alias ID 3.
+        DisplaySnapshot(displays: [
+            DisplayInfo(id: 13, identity: "placeholder", builtIn: false, online: true,
+                        active: true, mirrored: false, hasHardwareIdentity:
+                            DisplayHardwareIdentity.isUsableExternal(vendor: 1970170734, model: 1986622068)),
+            DisplayInfo(id: 3, identity: "offline-alias", builtIn: false, online: false,
+                        active: false, mirrored: false)
+        ], lidClosed: false)
+    }
+
+    static func testRecordedHotplug() async {
+        let headless = recordedHeadlessState()
+        expect(headless.externalDisplays.isEmpty, "recorded unkn/virt placeholder is not an external monitor")
+        expect(DisplayHardwareIdentity.isUsableExternal(vendor: 25001, model: 45061), "real monitor remains usable")
+        expect(!DisplayHardwareIdentity.isUsableExternal(vendor: 0, model: 12), "missing vendor remains excluded")
+        var locator = BuiltInRecoveryTarget()
+        expect(locator.resolve(in: headless, on: true, recovery: true) == nil, "never invent a built-in ID")
+        locator.observe(fixture())
+        locator.observe(headless)
+        expect(locator.resolve(in: headless, on: true, recovery: true) == 1,
+               "remembered built-in ID survives complete removal from enumeration")
+        expect(locator.resolve(in: headless, on: false, recovery: true) == nil, "remembered ID can never disable")
+        expect(locator.resolve(in: headless, on: true, recovery: false) == nil, "fallback is recovery-only")
+        var closed = headless
+        closed.lidClosed = true
+        expect(locator.resolve(in: closed, on: true, recovery: true) == nil, "do not force a hidden panel with closed lid")
+        expect(locator.resolve(in: fixture(present: false), on: true, recovery: true) == nil,
+               "do not reuse remembered ID with a physical external still active")
+        var reused = headless
+        reused.displays.append(DisplayInfo(id: 1, identity: "different-display", builtIn: false,
+                                           online: false, active: false, mirrored: false))
+        expect(locator.resolve(in: reused, on: true, recovery: true) == nil, "reject an ID now assigned to another record")
+        locator.observe(fixture(builtInID: 99))
+        expect(locator.resolve(in: fixture(builtInID: 99), on: true, recovery: true) == 99,
+               "fresh built-in identification always wins")
+        expect(locator.resolve(in: headless, on: true, recovery: true) == 99, "update remembered ID after re-enumeration")
+
+        let (controller, hardware, helper) = await disabled()
+        hardware.simulateHeadlessRecovery = true
+        hardware.state = headless
+        await controller.testEvaluate()
+        expect(hardware.recoveredIDs == [1] && hardware.state.builtInIsRestored,
+               "production controller recovers recorded unplug topology via remembered target")
+        expect(!controller.testRecoveryPending && helper.stops == 1, "release after headless recovery is confirmed")
+
+        let independent = FakeDisplayHardware()
+        _ = try! independent.snapshot() // Helper handshake runs before off.
+        independent.simulateHeadlessRecovery = true
+        independent.state = headless
+        var recovery = WatchdogRecovery()
+        recovery.request()
+        expect(!recovery.step(using: independent) && independent.recoveredIDs == [1],
+               "independent recovery uses the same remembered target")
+        expect(!recovery.step(using: independent), "headless recovery requires first active observation")
+        expect(recovery.step(using: independent), "headless recovery completes on second active observation")
     }
 
     static func testWatchdogRecovery() {
