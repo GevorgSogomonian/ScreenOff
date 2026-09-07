@@ -2,7 +2,7 @@
 
 ## Automated checks
 
-`bash Scripts/test.sh` covers 54 assertions: automatic/manual priority, built-in self-events, monitor replacement and ordering, no-active-external invariants, mirroring, lid closure, missing panels, failure inhibition, crash, EOF, heartbeat timeout, and independent unplug recovery decisions.
+`bash Scripts/test.sh` now runs 266 checks: 54 policy/lease checks, 19 popover geometry checks, and 193 checks of the production controller and persistent watchdog recovery engine with injected hardware. The latter cannot issue real display transactions.
 
 `bash Scripts/build.sh` compiles both executables, produces the icon and app bundle, verifies the code signature with `codesign --verify --deep --strict`, and lints Info.plist.
 
@@ -13,7 +13,19 @@
 - Preview mode does not start or evaluate the display controller and does not change preferences. The test menu stays open across focus changes so activity in another app cannot interrupt the frame measurements; production retains normal transient-menu behavior.
 - All 54 original policy/watchdog checks continue to pass (73 pure checks total). The display switching implementation is unchanged in this patch.
 
-## Hardware validation
+## Version 1.0.2: unplug and lid recovery
+
+The user reported that removing the monitor cable from the Mac or dock left the built-in disabled, even after closing/opening the lid. Code inspection found premature release when the built-in disappeared from enumeration, unverified release before sleep, a lid-closed false success, and a helper that exited after bounded unsuccessful recovery. These paths now retain the restoration obligation.
+
+- The production `DisplayController` is tested against temporary loss of both displays, repeated API/read failures, changed built-in IDs, inactive-but-online panels, sleep without a wake callback, lid closure, helper death, orphaned disabled panels on startup, stale active lists after remove/disable events, temporary headless displays, unplug during the off transaction, and reconnection during recovery.
+- The production `WatchdogRecovery` is tested across 100 unavailable-panel polls, lid closure, repeated API errors, transient loss during verification, and already-restored panels. It must not finish until two separate observations confirm an online/active built-in with an open lid. A redundant enable is not required for a panel already confirmed active.
+- `bash Scripts/test-restore-only.sh` passed against the actual 1.0.2 helper for explicit restore command, pipe EOF while the parent remains alive, and `--restore` startup. Each helper exited successfully and the built-in was confirmed active. No disable command was sent. This validates IPC and completion, not physical hotplug recovery.
+- `bash Scripts/test-popover.sh` passed all four native AppKit stages again. The measured gap was 2.5 points for initial show, growth, shrink and reopen with the current display configuration.
+- Before developing this fix, `--recover` successfully restored the user's disabled panel; a separate read-only diagnostic confirmed it online and active. Development and validation of 1.0.2 did not deliberately disable it again.
+
+**Physical cable removal, lid closure and sleep have not been repeated with 1.0.2.** The simulated regressions establish the corrected control flow, but final end-to-end confirmation of the reported cable-removal scenario requires testing the updated app on the user's Mac/dock.
+
+## Earlier hardware validation (1.0.0)
 
 Target: MacBook Pro (M1), macOS 27.0 beta, build 26A5425a. Read-only probing found both SLS/CGS disconnect and display-list symbols, an online built-in panel, and one active external display.
 
@@ -33,8 +45,8 @@ The integration harness runs a full `NSApplication` event loop. A plain synchron
 - Unplug the last external while built-in is off; the built-in must return.
 - Reconnect with automatic mode enabled; the built-in must turn off after settling.
 - Turn built-in on manually while automatic remains enabled; it must stay on until external topology changes.
-- Sleep and wake with an external attached; the intended mode must resume once links settle.
-- Close/open the lid; the app must not fight native clamshell behavior.
+- Sleep and wake with an external attached; recovery must complete first and the screen must remain available until reconnecting the external or choosing off manually.
+- Close/open the lid; the pending restoration must survive and complete once the panel becomes active.
 - Quit while off; the built-in must return and the helper must exit.
 - Remove external during a transition; the built-in must recover.
 - Restart macOS with automatic mode enabled and login approval granted; ScreenOff must start.

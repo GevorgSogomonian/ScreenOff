@@ -7,6 +7,7 @@ struct DisplayInfo: Codable, Equatable {
     let online: Bool
     let active: Bool
     let mirrored: Bool
+    var hasHardwareIdentity: Bool = true
 }
 
 struct DisplaySnapshot: Codable, Equatable {
@@ -15,8 +16,9 @@ struct DisplaySnapshot: Codable, Equatable {
 
     var builtIn: DisplayInfo? { displays.first { $0.builtIn } }
     var builtInIsOn: Bool { builtIn?.online == true }
+    var builtInIsRestored: Bool { !lidClosed && builtIn?.online == true && builtIn?.active == true }
     var externalDisplays: [DisplayInfo] {
-        displays.filter { !$0.builtIn && $0.online && $0.active }
+        displays.filter { !$0.builtIn && $0.online && $0.active && $0.hasHardwareIdentity }
     }
     var externalIdentities: Set<String> { Set(externalDisplays.map(\.identity)) }
     var canDisable: Bool {

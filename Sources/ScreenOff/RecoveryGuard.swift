@@ -2,17 +2,32 @@ import Foundation
 import Darwin
 
 @MainActor
-final class RecoveryGuard {
+protocol RecoveryGuarding: AnyObject {
+    var isRunning: Bool { get }
+    func start(restoring: Bool) throws
+    func requestRestore()
+    func stop()
+}
+
+@MainActor
+final class RecoveryGuard: RecoveryGuarding {
     private var process: Process?
     private var input: FileHandle?
     private var output: FileHandle?
     private var heartbeat: Timer?
+    private var retiring: [Process] = []
 
     var isRunning: Bool { process?.isRunning == true }
 
-    func start() throws {
-        if isRunning { return }
+    func start(restoring: Bool = false) throws {
+        if isRunning {
+            if restoring { requestRestore() }
+            return
+        }
         stop()
+        retiring.removeAll { !$0.isRunning }
+        // Do not race a still-restoring predecessor with a new disable.
+        guard retiring.isEmpty else { throw DisplayFailure.watchdog }
         guard let executable = Bundle.main.executableURL?
             .deletingLastPathComponent().appendingPathComponent("ScreenOffWatchdog"),
               FileManager.default.isExecutableFile(atPath: executable.path) else {
@@ -27,7 +42,7 @@ final class RecoveryGuard {
             _ = fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) | FD_CLOEXEC)
         }
         child.executableURL = executable
-        child.arguments = ["--watch", String(getpid())]
+        child.arguments = ["--watch", String(getpid())] + (restoring ? ["--restore"] : [])
         child.standardInput = commands
         child.standardOutput = replies
         child.standardError = FileHandle.nullDevice
@@ -60,6 +75,12 @@ final class RecoveryGuard {
         _ = Darwin.write(input.fileDescriptor, &byte, 1)
     }
 
+    func requestRestore() {
+        guard isRunning, let input else { return }
+        var command: UInt8 = 2
+        _ = Darwin.write(input.fileDescriptor, &command, 1)
+    }
+
     func stop() {
         heartbeat?.invalidate()
         heartbeat = nil
@@ -69,6 +90,7 @@ final class RecoveryGuard {
         output = nil
         // EOF instructs the helper to restore before it exits. Never terminate
         // it forcibly: it may still be rescuing the panel after an app failure.
+        if let process, process.isRunning { retiring.append(process) }
         process = nil
     }
 }

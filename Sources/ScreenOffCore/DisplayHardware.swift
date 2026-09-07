@@ -6,7 +6,7 @@ import Darwin
 
 /// Runtime resolution keeps unsupported macOS versions launchable. Apple does
 /// not publish a display-disconnect API. No brightness or mirroring substitute.
-final class DisplayHardware {
+final class DisplayHardware: DisplayHardwareAccess {
     private typealias ListFn = @convention(c) (
         UInt32, UnsafeMutablePointer<UInt32>?, UnsafeMutablePointer<UInt32>?
     ) -> CGError
@@ -83,7 +83,8 @@ final class DisplayHardware {
                                builtIn: CGDisplayIsBuiltin(id) != 0,
                                online: online.contains(id),
                                active: active.contains(id),
-                               mirrored: CGDisplayIsInMirrorSet(id) != 0)
+                               mirrored: CGDisplayIsInMirrorSet(id) != 0,
+                               hasHardwareIdentity: CGDisplayVendorNumber(id) != 0 && CGDisplayModelNumber(id) != 0)
         }
         return DisplaySnapshot(displays: displays, lidClosed: isLidClosed())
     }
@@ -104,7 +105,10 @@ final class DisplayHardware {
         }
         let current = try snapshot()
         guard let target = current.builtIn else { throw DisplayFailure.noBuiltIn }
-        if target.online == on { return }
+        // Online alone is insufficient during recovery (closed lid/inactive
+        // panel). But re-enabling an already active panel can be rejected by
+        // SkyLight as a redundant transaction. Callers verify after yielding.
+        if target.online == on && (!recovery || current.builtInIsRestored) { return }
         if !on {
             guard !current.lidClosed else { throw DisplayFailure.lidClosed }
             guard !current.externalDisplays.isEmpty else { throw DisplayFailure.noExternal }
@@ -128,15 +132,15 @@ final class DisplayHardware {
         }
     }
 
-    /// Used only by the independent rescue process / explicit recovery CLI.
+    /// Bounded explicit CLI probe. The watchdog uses persistent nonblocking
+    /// WatchdogRecovery steps instead, so it never abandons a missing panel.
     /// Retrying obtains a fresh ID every time. Never disables any display.
     func recover() -> Bool {
         for _ in 0..<8 {
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-            if let state = try? snapshot(), state.builtInIsOn || state.lidClosed { return true }
             try? setBuiltIn(on: true, recovery: true)
             RunLoop.current.run(until: Date().addingTimeInterval(0.35))
-            if let state = try? snapshot(), state.builtInIsOn || state.lidClosed { return true }
+            if let state = try? snapshot(), state.builtInIsRestored { return true }
         }
         return false
     }

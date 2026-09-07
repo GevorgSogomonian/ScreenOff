@@ -10,8 +10,9 @@ final class DisplayController: ObservableObject {
     @Published private(set) var busy = false
     @Published private(set) var notice: String?
     @Published private(set) var loginNotice: String?
-    let hardware = DisplayHardware()
-    private let guardProcess = RecoveryGuard()
+    let hardware: any DisplayHardwareAccess
+    private let guardProcess: any RecoveryGuarding
+    private let verificationDelay: UInt64
     private var policy: DisplayPolicy
     private let preferences: UserDefaults
     private var timer: Timer?
@@ -21,13 +22,21 @@ final class DisplayController: ObservableObject {
     private var stopping = false
     private var notBefore = Date.distantPast
     private var hasDisabled = false
+    private var recoveryRequested = false
+    private var protectedExternalIdentities: Set<String> = []
+    private var protectedExternalIDs: Set<UInt32> = []
     private var registeredCallback = false
-    private var guardExpected = false
     static let recoverNotification = Notification.Name("com.gevorg.screenoff.restore")
 
-    init(preferences: UserDefaults = .standard, testing: Bool = false) {
+    init(preferences: UserDefaults = .standard, testing: Bool = false,
+         hardware: any DisplayHardwareAccess = DisplayHardware(),
+         guardProcess: (any RecoveryGuarding)? = nil,
+         automaticPreference: Bool? = nil, verificationDelay: UInt64 = 150_000_000) {
+        self.hardware = hardware
+        self.guardProcess = guardProcess ?? RecoveryGuard()
+        self.verificationDelay = verificationDelay
         self.preferences = preferences
-        let saved = !testing && preferences.bool(forKey: "automaticDisplayOff")
+        let saved = automaticPreference ?? (!testing && preferences.bool(forKey: "automaticDisplayOff"))
         policy = DisplayPolicy(automatic: saved)
         automatic = saved
         if !hardware.supported {
@@ -37,7 +46,7 @@ final class DisplayController: ObservableObject {
     }
 
     var canToggle: Bool {
-        hardware.supported && !busy && !snapshot.lidClosed && snapshot.builtIn != nil
+        hardware.supported && !busy && !recoveryRequested && !snapshot.lidClosed && snapshot.builtIn != nil
             && (!snapshot.builtInIsOn || snapshot.canDisable)
     }
 
@@ -79,7 +88,14 @@ final class DisplayController: ObservableObject {
         requestEvaluation()
     }
 
-    func displaysChanged() {
+    func displaysChanged(displayID: UInt32? = nil, flags: CGDisplayChangeSummaryFlags = []) {
+        if let displayID, hasDisabled, protectedExternalIDs.contains(displayID),
+           !flags.intersection([.removeFlag, .disabledFlag]).isEmpty {
+            // An explicit removal wins even if CoreGraphics still exposes an
+            // old active list or creates a temporary headless virtual display.
+            recoveryRequested = true
+            guardProcess.requestRestore()
+        }
         // Let link training and WindowServer reconfiguration settle. The helper
         // independently restores immediately if the last external disappears.
         notBefore = max(notBefore, Date().addingTimeInterval(0.8))
@@ -87,7 +103,7 @@ final class DisplayController: ObservableObject {
     }
 
     func setBuiltIn(on: Bool) {
-        guard !busy else { return }
+        guard !busy, !recoveryRequested || on else { return }
         policy.setManual(on: on)
         notice = nil
         notBefore = .distantPast
@@ -127,27 +143,45 @@ final class DisplayController: ObservableObject {
     }
 
     func requestEvaluation() {
-        guard !stopping, !asleep, evaluation == nil else { return }
+        guard !stopping, evaluation == nil else { return }
         evaluation = Task { [weak self] in
             guard let self else { return }
             defer { self.evaluation = nil }
             do {
                 self.snapshot = try self.hardware.snapshot()
-                // Restoration never waits for a debounce timer.
                 let desired = self.policy.wantsBuiltInOn(for: self.snapshot)
-                if self.guardExpected && !self.guardProcess.isRunning && self.hasDisabled && !desired {
+                if !self.hasDisabled && self.snapshot.builtIn != nil &&
+                    !self.snapshot.builtInIsOn && !self.snapshot.lidClosed {
+                    // A previous process or a sleep transition may have left
+                    // the panel off. Adopt recovery responsibility immediately.
+                    self.hasDisabled = true
+                    self.recoveryRequested = true
                     self.policy.stopAfterFailure()
-                    self.notice = "Защита восстановила экран. Для повторного отключения используйте переключатель."
+                }
+                guard self.hardware.supported else { return }
+                if self.hasDisabled {
+                    if desired || self.asleep || self.snapshot.lidClosed || self.snapshot.builtIn == nil ||
+                        self.snapshot.builtInIsOn ||
+                        self.protectedExternalIdentities.isDisjoint(with: self.snapshot.externalIdentities) {
+                        self.recoveryRequested = true
+                    }
+                    if !self.guardProcess.isRunning {
+                        self.recoveryRequested = true
+                        self.policy.stopAfterFailure()
+                        try self.guardProcess.start(restoring: true)
+                    }
+                }
+                if self.recoveryRequested {
+                    self.policy.stopAfterFailure()
+                    self.guardProcess.requestRestore()
+                    // Never skip this for a closed lid or a temporarily missing
+                    // built-in. Failure keeps the obligation for the next tick.
                     try await self.transition(on: true)
                     return
                 }
-                guard self.hardware.supported else { return }
-                if !desired && Date() < self.notBefore { return }
-                if desired && self.snapshot.lidClosed { return }
-                if self.snapshot.builtIn != nil && self.snapshot.builtInIsOn != desired {
-                    try await self.transition(on: desired)
-                } else if desired && self.guardExpected {
-                    self.releaseGuard()
+                guard !self.asleep, Date() >= self.notBefore else { return }
+                if !desired && self.snapshot.builtInIsOn {
+                    try await self.transition(on: false)
                 }
             } catch {
                 await self.handleFailure(error)
@@ -159,18 +193,19 @@ final class DisplayController: ObservableObject {
         busy = true
         defer { busy = false }
         if !on {
-            try guardProcess.start()
-            guardExpected = true
+            try guardProcess.start(restoring: false)
             hasDisabled = true // Even a failed transaction may need rollback.
+            protectedExternalIdentities = snapshot.externalIdentities
+            protectedExternalIDs = Set(snapshot.externalDisplays.map(\.id))
         }
-        try hardware.setBuiltIn(on: on)
+        try hardware.setBuiltIn(on: on, recovery: on)
         for _ in 0..<12 {
-            try await Task.sleep(nanoseconds: 150_000_000)
+            try await Task.sleep(nanoseconds: verificationDelay)
             snapshot = try hardware.snapshot()
-            if !on && (stopping || asleep || snapshot.externalDisplays.isEmpty) {
+            if !on && (stopping || asleep || recoveryRequested || snapshot.externalDisplays.isEmpty) {
                 throw DisplayFailure.noExternal
             }
-            if snapshot.builtIn != nil && snapshot.builtInIsOn == on {
+            if on ? snapshot.builtInIsRestored : (snapshot.builtIn != nil && !snapshot.builtInIsOn) {
                 if on { releaseGuard() }
                 return
             }
@@ -179,9 +214,14 @@ final class DisplayController: ObservableObject {
     }
 
     private func releaseGuard() {
+        guard snapshot.builtInIsRestored else { return }
         guardProcess.stop()
-        guardExpected = false
         hasDisabled = false
+        recoveryRequested = false
+        protectedExternalIdentities = []
+        protectedExternalIDs = []
+        notBefore = max(notBefore, Date().addingTimeInterval(2))
+        notice = nil
     }
 
     private func handleFailure(_ error: Error) async {
@@ -190,10 +230,10 @@ final class DisplayController: ObservableObject {
         // Verification failure must actively undo any partially applied disable.
         // Keep the helper alive if restoration does not complete.
         if hasDisabled {
-            do { try await transition(on: true) }
-            catch {
-                notice = "Не удалось восстановить экран. Отсоедините внешний монитор или закройте и откройте крышку MacBook."
-            }
+            recoveryRequested = true
+            guardProcess.requestRestore()
+            try? hardware.setBuiltIn(on: true, recovery: true)
+            notice = "Восстанавливаю встроенный экран. Попытки продолжатся, пока macOS не подтвердит включение."
         }
         snapshot = (try? hardware.snapshot()) ?? snapshot
     }
@@ -201,14 +241,17 @@ final class DisplayController: ObservableObject {
     private func prepareForSleep() {
         asleep = true
         if hasDisabled {
-            try? hardware.setBuiltIn(on: true)
-            // Closing the pipe asks the independent helper to verify recovery.
-            releaseGuard()
+            recoveryRequested = true
+            guardProcess.requestRestore()
+            try? hardware.setBuiltIn(on: true, recovery: true)
+            // Keep the helper and obligation through sleep/lid closure.
         }
     }
 
     @objc private func emergencyRestore() {
         policy.stopAfterFailure()
+        asleep = false
+        if hasDisabled { recoveryRequested = true }
         notice = nil
         notBefore = .distantPast
         requestEvaluation()
@@ -226,6 +269,8 @@ final class DisplayController: ObservableObject {
         // Let an in-flight transaction finish before restoring and terminating.
         if let evaluation { await evaluation.value }
         if hasDisabled {
+            recoveryRequested = true
+            guardProcess.requestRestore()
             do { try await transition(on: true) }
             catch { guardProcess.stop(); return false }
         }
@@ -253,8 +298,20 @@ final class DisplayController: ObservableObject {
     }
 }
 
-private let displayChanged: CGDisplayReconfigurationCallBack = { _, flags, context in
+private let displayChanged: CGDisplayReconfigurationCallBack = { displayID, flags, context in
     guard !flags.contains(.beginConfigurationFlag), let context else { return }
     let controller = Unmanaged<DisplayController>.fromOpaque(context).takeUnretainedValue()
-    Task { @MainActor in controller.displaysChanged() }
+    Task { @MainActor in controller.displaysChanged(displayID: displayID, flags: flags) }
 }
+
+#if CONTROLLER_TEST
+extension DisplayController {
+    func testEvaluate() async {
+        requestEvaluation()
+        if let evaluation { await evaluation.value }
+    }
+    func testSleep() { prepareForSleep() }
+    var testRecoveryPending: Bool { hasDisabled }
+    var testRecoveryRequested: Bool { recoveryRequested }
+}
+#endif
