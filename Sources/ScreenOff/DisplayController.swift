@@ -15,6 +15,8 @@ final class DisplayController: ObservableObject {
     private let verificationDelay: UInt64
     private var policy: DisplayPolicy
     private let preferences: UserDefaults
+    private let testing: Bool
+    private let previewOnly: Bool
     private var timer: Timer?
     private var evaluation: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
@@ -31,11 +33,14 @@ final class DisplayController: ObservableObject {
     init(preferences: UserDefaults = .standard, testing: Bool = false,
          hardware: any DisplayHardwareAccess = DisplayHardware(),
          guardProcess: (any RecoveryGuarding)? = nil,
-         automaticPreference: Bool? = nil, verificationDelay: UInt64 = 150_000_000) {
+         automaticPreference: Bool? = nil, verificationDelay: UInt64 = 150_000_000,
+         previewOnly: Bool = false) {
         self.hardware = hardware
         self.guardProcess = guardProcess ?? RecoveryGuard()
         self.verificationDelay = verificationDelay
         self.preferences = preferences
+        self.testing = testing
+        self.previewOnly = previewOnly
         let saved = automaticPreference ?? (!testing && preferences.bool(forKey: "automaticDisplayOff"))
         policy = DisplayPolicy(automatic: saved)
         automatic = saved
@@ -50,6 +55,14 @@ final class DisplayController: ObservableObject {
             && (!snapshot.builtInIsOn || snapshot.canDisable)
     }
 
+    /// Preserve the existing saved preference, with a positive UI meaning:
+    /// ON = use both displays; OFF = automatically disable the built-in.
+    var usesBuiltInWithExternal: Bool { !automatic }
+
+    func setUsesBuiltInWithExternal(_ enabled: Bool) {
+        setAutomatic(!enabled)
+    }
+
     var statusText: String {
         if let notice { return notice }
         if busy { return "Переключение дисплея…" }
@@ -58,7 +71,7 @@ final class DisplayController: ObservableObject {
         if snapshot.displays.contains(where: { $0.online && $0.mirrored }) {
             return "Для отключения экрана выключите видеоповтор в macOS"
         }
-        if snapshot.externalDisplays.isEmpty { return "Подключите внешний монитор" }
+        if snapshot.externalDisplays.isEmpty { return "Без внешнего монитора экран MacBook включён" }
         return snapshot.builtInIsOn ? "Встроенный дисплей включён" : "Работает только внешний дисплей"
     }
 
@@ -113,10 +126,15 @@ final class DisplayController: ObservableObject {
     func setAutomatic(_ enabled: Bool) {
         policy.setAutomatic(enabled)
         automatic = enabled
-        preferences.set(enabled, forKey: "automaticDisplayOff")
+        if !testing { preferences.set(enabled, forKey: "automaticDisplayOff") }
         notice = nil
-        // This is part of automatic mode, keeping the interface at two toggles.
-        // Manual mode remains available after the user removes the login item.
+        // Login registration follows the mode that requires background work.
+        // Preview/test instances never register login items or save preferences.
+        if testing {
+            notBefore = .distantPast
+            requestEvaluation()
+            return
+        }
         do {
             if enabled && SMAppService.mainApp.status != .enabled {
                 try SMAppService.mainApp.register()
@@ -132,7 +150,7 @@ final class DisplayController: ObservableObject {
     }
 
     func updateLoginNotice() {
-        guard automatic else { loginNotice = nil; return }
+        guard automatic, !testing else { loginNotice = nil; return }
         switch SMAppService.mainApp.status {
         case .enabled: loginNotice = nil
         case .requiresApproval:
@@ -143,7 +161,7 @@ final class DisplayController: ObservableObject {
     }
 
     func requestEvaluation() {
-        guard !stopping, evaluation == nil else { return }
+        guard !previewOnly, !stopping, evaluation == nil else { return }
         evaluation = Task { [weak self] in
             guard let self else { return }
             defer { self.evaluation = nil }

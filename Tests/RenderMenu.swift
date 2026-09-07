@@ -6,8 +6,12 @@ enum RenderMenu {
     @MainActor static func main() throws {
         _ = NSApplication.shared
         NSApp.appearance = NSAppearance(named: .aqua)
-        let controller = DisplayController(testing: true)
-        let view = NSHostingView(rootView: MenuView(controller: controller, quit: {})
+        let hardware = DisplayHardware()
+        let on = (try? hardware.snapshot().builtInIsOn) ?? true
+        let controller = DisplayController(testing: true, hardware: hardware,
+                                           automaticPreference: !on, previewOnly: true)
+        let view = NSHostingView(rootView: MenuView(controller: controller, interface: InterfacePreferences(),
+                                                  changeVisibility: {}, quit: {})
             .background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, .light))
         view.appearance = NSAppearance(named: .aqua)
         view.frame = NSRect(origin: .zero, size: view.fittingSize)

@@ -12,7 +12,7 @@ enum PopoverIntegration {
         Task { @MainActor in
             do {
                 try await Task.sleep(nanoseconds: 800_000_000)
-                _ = delegate.applicationShouldHandleReopen(app, hasVisibleWindows: false)
+                delegate.testShowPopover()
                 try await Task.sleep(nanoseconds: 400_000_000)
                 try check(delegate, stage: "initial show")
                 let initialSize = delegate.testPopover.contentSize
@@ -23,7 +23,7 @@ enum PopoverIntegration {
                 try await Task.sleep(nanoseconds: 500_000_000)
                 try check(delegate, stage: "content shrinks")
                 delegate.testPopover.close()
-                _ = delegate.applicationShouldHandleReopen(app, hasVisibleWindows: false)
+                delegate.testShowPopover()
                 try await Task.sleep(nanoseconds: 500_000_000)
                 try check(delegate, stage: "reopened")
                 delegate.testPopover.close()

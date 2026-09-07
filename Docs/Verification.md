@@ -2,9 +2,17 @@
 
 ## Automated checks
 
-`bash Scripts/test.sh` now runs 286 checks: 54 policy/lease checks, 19 popover geometry checks, and 213 checks of the production controller, recovery target selection and persistent watchdog recovery engine with injected hardware. The latter cannot issue real display transactions.
+`bash Scripts/test.sh` now runs 295 checks: 54 policy/lease checks, 19 popover geometry checks, and 222 checks of the production controller, recovery target selection and persistent watchdog recovery engine with injected hardware. The latter cannot issue real display transactions.
 
 `bash Scripts/build.sh` compiles both executables, produces the icon and app bundle, verifies the code signature with `codesign --verify --deep --strict`, and lints Info.plist.
+
+## Version 1.1.0: one preference and an optional status item
+
+- Nine additional controller checks pass with injected hardware: migration of the old automatic preference to the inverse UI value, selecting OFF without an external, applying it after attachment, immediate restoration on ON, persistence of ON across topology changes, clearing a temporary recovery override, and preview controls never starting display transactions or helpers.
+- `bash Scripts/test-interface.sh` passed 11 native checks in an isolated preview app bundle. They cover saved visibility, hidden background startup, a real LaunchServices reopen to the same PID, opening settings without returning the icon, fitting the content, closing/reusing the window, returning the icon, opening its popover, and hiding from the open popover. The latter caught an AppKit animated-close issue: the popover now closes synchronously before its status-item anchor is removed.
+- The native menu was rendered and visually inspected: one display-preference switch, one hide/show button, status, Spotlight instructions and quit. The native settings-window bounds were checked against the complete content size. SwiftUI did not expose its child accessibility tree to the in-process test on this OS, so control count is verified visually rather than claimed as an automated accessibility check.
+- All four native popover positioning checks passed with a 2.0-point gap on this Mac.
+- The hardware transaction and watchdog recovery implementation from 1.0.3 is unchanged. The new UI tests never issue physical display transactions. The prior user-confirmed cable-removal result remains the hardware evidence; this UI release does not claim a new physical unplug, sleep or login test.
 
 ## Version 1.0.1: menu positioning
 
@@ -57,12 +65,13 @@ The integration harness runs a full `NSApplication` event loop. A plain synchron
 
 - Unplug the last external while built-in is off; the built-in must return.
 - Reconnect with automatic mode enabled; the built-in must turn off after settling.
-- Turn built-in on manually while automatic remains enabled; it must stay on until external topology changes.
-- Sleep and wake with an external attached; recovery must complete first and the screen must remain available until reconnecting the external or choosing off manually.
+- Turn the single preference ON; the built-in must restore and stay on across external reconnections. Turn it OFF again to resume automatic disabling.
+- Sleep and wake with an external attached; recovery must complete first and the screen must remain available until reconnecting the external or choosing the OFF preference again.
 - Close/open the lid; the pending restoration must survive and complete once the panel becomes active.
 - Quit while off; the built-in must return and the helper must exit.
 - Remove external during a transition; the built-in must recover.
-- Restart macOS with automatic mode enabled and login approval granted; ScreenOff must start.
+- Restart macOS with the preference OFF and login approval granted; ScreenOff must start without opening settings. The hidden-icon preference must remain in effect.
+- Hide the icon, close settings, then open ScreenOff through Spotlight; settings must reappear without a second process or an unwanted status item.
 - Try a mirrored layout; the app must leave it unchanged and explain the prerequisite.
 
 These physical hotplug, sleep and login scenarios require manual hardware interaction; unit checks alone do not establish them.

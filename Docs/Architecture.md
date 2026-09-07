@@ -1,6 +1,6 @@
 # Architecture
 
-ScreenOff is a macOS accessory application. There is no Dock item, primary window, package dependency, network client, system extension, privileged service, or telemetry.
+ScreenOff is a macOS accessory application. It has an optional status item and a reusable settings window. There is no Dock item, package dependency, network client, system extension, privileged service, or telemetry.
 
 ## Components
 
@@ -15,7 +15,9 @@ starts a replacement helper directly in recovery mode. A restored panel does not
 receive a redundant enable transaction. EOF cancels the read source, while the
 timer continues recovery. A retired helper is allowed to finish before another
 disable can start, preventing competing enable/disable transactions.
-- `MenuView` / `AppDelegate`: two switches in a native popover, live status, quit button, single-instance handling.
+- `MenuView` / `AppDelegate`: one positive preference switch, live status, a hide/show button, and a quit button. The same view/controller backs a native popover and a reusable settings window. `InterfacePreferences` stores the independent `hideStatusItem` preference. Hiding removes the actual `NSStatusItem` and opens settings so the controls remain reachable.
+- LaunchServices reopen events (Spotlight/Finder) display the settings window even while the icon is hidden. Closing this window does not stop display control. An explicit foreground launch opens settings; a login-item launch (the Apple event login marker) or `--background` remains quiet. A second process forwards a distributed show-settings notification to the existing instance and exits.
+- The UI preference is the inverse of the existing `automaticDisplayOff` key: ON means both displays, OFF means automatic disabling. Existing installations need no preference migration. `setAutomatic` clears temporary recovery overrides; it remains an internal controller operation. Preview instances cannot evaluate display changes or register login items.
 
 The hosting controller explicitly publishes its preferred content size. After
 presentation and every native window resize, the popover's top is anchored to
@@ -46,4 +48,4 @@ Private ABI changes cannot be completely detected by symbol lookup. Verified onl
 
 `--diagnose` is read-only and emits OS version, symbol availability, and topology JSON. `--recover` tells an existing instance to suspend automation and also invokes independent recovery. `--hardware-test` exercises the guarded menu transaction for two seconds and restores it. CLI modes do not change the saved automatic preference.
 
-`--restore-on-launch` starts the menu application with a temporary manual-on choice while preserving the automatic preference. It is useful after an update or a recovery. The two menu switches retain their usual behavior.
+`--restore-on-launch` starts the menu application with a temporary manual-on choice while preserving the automatic preference. It is useful after an update or a recovery. The saved switch position remains unchanged; choosing a mode again clears this temporary override. `--background` suppresses the initial settings window without affecting subsequent Spotlight reopen events.

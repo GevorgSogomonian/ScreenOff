@@ -2,6 +2,8 @@ import SwiftUI
 
 struct MenuView: View {
     @ObservedObject var controller: DisplayController
+    @ObservedObject var interface: InterfacePreferences
+    var changeVisibility: () -> Void
     var quit: () -> Void
     private let accent = Color(red: 0.08, green: 0.56, blue: 0.46)
 
@@ -35,41 +37,24 @@ struct MenuView: View {
             }
             .padding(.bottom, 20)
 
-            VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Встроенный дисплей").font(.system(size: 13, weight: .medium))
-                        Text(controller.snapshot.builtInIsOn ? "Экран MacBook включён" : "Экран MacBook выключен")
-                            .font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Toggle("Встроенный дисплей", isOn: Binding(get: { controller.snapshot.builtInIsOn },
-                                     set: { controller.setBuiltIn(on: $0) }))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .disabled(!controller.canToggle)
-                        .accessibilityIdentifier("builtinDisplayToggle")
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Использовать встроенный дисплей")
+                        .font(.system(size: 13, weight: .medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("С внешним монитором")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
-                .padding(14)
-
-                Divider().padding(.horizontal, 14)
-
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Автовыключение").font(.system(size: 13, weight: .medium))
-                        Text("При подключении внешнего монитора")
-                            .font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Toggle("Автовыключение", isOn: Binding(get: { controller.automatic },
-                                     set: { controller.setAutomatic($0) }))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .disabled(!controller.hardware.supported || controller.busy)
-                        .accessibilityIdentifier("automaticDisplayToggle")
-                }
-                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Toggle("Использовать встроенный дисплей с внешним монитором",
+                       isOn: Binding(get: { controller.usesBuiltInWithExternal },
+                                     set: { controller.setUsesBuiltInWithExternal($0) }))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(!controller.hardware.supported || controller.busy)
+                    .accessibilityIdentifier("useBuiltInWithExternalToggle")
             }
+            .padding(14)
             .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.06), lineWidth: 1))
 
@@ -92,6 +77,20 @@ struct MenuView: View {
                 Spacer(minLength: 0)
             }
             .padding(.top, 14)
+
+            Divider().padding(.vertical, 14)
+            Button(action: changeVisibility) {
+                Label(interface.statusItemHidden ? "Показать значок в строке меню" : "Скрыть значок из строки меню",
+                      systemImage: interface.statusItemHidden ? "eye" : "eye.slash")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(accent)
+            .accessibilityIdentifier("statusItemVisibilityButton")
+            Text("Открыть настройки: Spotlight → ScreenOff")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .padding(.top, 7)
         }
         .padding(20)
         .frame(width: 374)

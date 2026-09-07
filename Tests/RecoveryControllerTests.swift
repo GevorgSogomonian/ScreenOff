@@ -104,6 +104,50 @@ enum RecoveryControllerTests {
     }
 
     static func main() async {
+        // The only UI switch expresses a persistent positive preference, not
+        // the current panel state. Old automatic=true maps to switch OFF.
+        do {
+            let (controller, hardware, helper) = make(FakeDisplayHardware(fixture(externals: [])))
+            expect(!controller.usesBuiltInWithExternal, "existing automatic preference maps to OFF")
+            controller.setUsesBuiltInWithExternal(false)
+            await controller.testEvaluate()
+            expect(hardware.calls.isEmpty && hardware.state.builtInIsOn,
+                   "OFF without an external saves intent and keeps the only display on")
+            hardware.state = fixture()
+            await controller.testEvaluate()
+            expect(!hardware.state.builtInIsOn && helper.isRunning,
+                   "attaching an external applies the saved OFF preference")
+            controller.setUsesBuiltInWithExternal(true)
+            await controller.testEvaluate()
+            expect(controller.usesBuiltInWithExternal && hardware.state.builtInIsRestored,
+                   "ON immediately restores the panel and disables automation")
+            hardware.state = fixture(externals: ["another-monitor"])
+            await controller.testEvaluate()
+            expect(hardware.state.builtInIsOn && hardware.calls.filter { !$0.on }.count == 1,
+                   "ON survives external topology changes")
+        }
+        do {
+            let (controller, hardware, _) = make()
+            controller.setBuiltIn(on: true) // Safe update/recovery override.
+            await controller.testEvaluate()
+            controller.setUsesBuiltInWithExternal(false)
+            await controller.testEvaluate()
+            expect(!hardware.state.builtInIsOn, "explicit OFF clears a temporary recovery override")
+            controller.setUsesBuiltInWithExternal(true)
+            await controller.testEvaluate()
+        }
+        do {
+            let hardware = FakeDisplayHardware()
+            let helper = FakeRecoveryGuard()
+            let controller = DisplayController(testing: true, hardware: hardware,
+                                               guardProcess: helper, previewOnly: true)
+            controller.setUsesBuiltInWithExternal(false)
+            await controller.testEvaluate()
+            controller.setUsesBuiltInWithExternal(true)
+            await controller.testEvaluate()
+            expect(hardware.calls.isEmpty && helper.starts.isEmpty,
+                   "clicking preview controls never starts display transactions or a helper")
+        }
         // Physical unplug can temporarily remove BOTH displays from enumeration.
         do {
             let (controller, hardware, helper) = await disabled()
