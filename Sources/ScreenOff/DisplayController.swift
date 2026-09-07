@@ -237,6 +237,7 @@ final class DisplayController: ObservableObject {
     /// the same guarded transaction and verification path as the menu switch.
     func hardwareTest() async throws {
         snapshot = try hardware.snapshot()
+        guard !snapshot.lidClosed else { throw DisplayFailure.lidClosed }
         guard snapshot.builtInIsOn, snapshot.canDisable else { throw DisplayFailure.noExternal }
         do {
             try await transition(on: false)

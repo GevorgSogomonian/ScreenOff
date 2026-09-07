@@ -17,6 +17,7 @@ Passed on this Mac:
 - The independent helper restored the built-in panel after its heartbeat pipe was closed while the parent process stayed alive. This verifies actual recovery from a second process, not merely WindowServer's automatic cleanup after the controlling process exits.
 - The menu's accessibility tree exposed two switches and the quit button. The native view was rendered and visually checked; the documented preview is in `Menu.png`.
 - Both application binaries were compiled for arm64 with a macOS 13 deployment target; ad-hoc signatures and Info.plist validation passed.
+- The packaged DMG passed `hdiutil verify`; its ZIP passed `unzip -tq`. A final repeat of the live probe was refused after the laptop lid was closed, as required by the safety guard; the earlier successful open-lid hardware tests are the basis of the switching result above.
 
 The integration harness runs a full `NSApplication` event loop. A plain synchronous loop can retain stale CoreGraphics state after a different process changes display configuration and falsely report that a successful recovery failed. The helper also maintains a proper application event loop. Anonymous pipe handles use close-on-exec for parent-only ends.
 
