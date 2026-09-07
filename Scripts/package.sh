@@ -11,5 +11,5 @@ cp Resources/Installation-ru.txt .build/dmg/"Прочитайте перед у�
 if [[ ! -e .build/dmg/Applications ]]; then ln -s /Applications .build/dmg/Applications; fi
 hdiutil create -volname "ScreenOff" -srcfolder .build/dmg -ov -format UDZO "dist/$NAME.dmg"
 ditto -c -k --sequesterRsrc --keepParent dist/ScreenOff.app "dist/$NAME.zip"
-shasum -a 256 "dist/$NAME.dmg" "dist/$NAME.zip" > dist/SHA256SUMS.txt
+(cd dist && shasum -a 256 "$NAME.dmg" "$NAME.zip") > dist/SHA256SUMS.txt
 echo "Ready: dist/$NAME.dmg"

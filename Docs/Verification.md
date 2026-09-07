@@ -6,6 +6,13 @@
 
 `bash Scripts/build.sh` compiles both executables, produces the icon and app bundle, verifies the code signature with `codesign --verify --deep --strict`, and lints Info.plist.
 
+## Version 1.0.1: menu positioning
+
+- 19 additional geometry checks pass for growing/shrinking menu content, display edges, and monitors above, below, left and right of the primary screen.
+- `bash Scripts/test-popover.sh` uses the actual AppDelegate/NSPopover in preview mode. All four stages passed on this Mac: initial presentation, content growth, content shrink, and reopening. Each measured a 2.0-point gap between the status button and the top of the native popover window.
+- Preview mode does not start or evaluate the display controller and does not change preferences. The test menu stays open across focus changes so activity in another app cannot interrupt the frame measurements; production retains normal transient-menu behavior.
+- All 54 original policy/watchdog checks continue to pass (73 pure checks total). The display switching implementation is unchanged in this patch.
+
 ## Hardware validation
 
 Target: MacBook Pro (M1), macOS 27.0 beta, build 26A5425a. Read-only probing found both SLS/CGS disconnect and display-list symbols, an online built-in panel, and one active external display.

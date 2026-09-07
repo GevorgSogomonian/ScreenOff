@@ -11,6 +11,14 @@ ScreenOff is a macOS accessory application. There is no Dock item, primary windo
 - `ScreenOffWatchdog`: a separate process with its own WindowServer connection and AppKit event loop. It checks every 750 ms and watches pipe input asynchronously; EOF, parent death, 8 seconds without a heartbeat, or no active external triggers recovery and exit. It only enables screens. No permanent launch agent is installed.
 - `MenuView` / `AppDelegate`: two switches in a native popover, live status, quit button, single-instance handling.
 
+The hosting controller explicitly publishes its preferred content size. After
+presentation and every native window resize, the popover's top is anchored to
+the status button converted into global screen coordinates. The native horizontal
+placement is preserved so the arrow remains aligned. Screen-configuration changes
+close the old popover, letting the next click acquire the current status-item
+window and display scale. This avoids the vertical gap after status/login text
+shrinks or the built-in screen is disconnected.
+
 ## Display transaction
 
 1. Enumerate all displays again, including offline entries, and resolve the built-in by the current `CGDisplayIsBuiltin` flag.
