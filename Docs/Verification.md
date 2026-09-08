@@ -6,6 +6,14 @@
 
 `bash Scripts/build.sh` compiles both executables, produces the icon and app bundle, verifies the code signature with `codesign --verify --deep --strict`, and lints Info.plist.
 
+## Version 1.2.0: window-only interface
+
+The status item, popover, visibility preference implementation and their geometry tests were removed. The settings window now contains one display preference, current status and quit. It cannot be minimized into the Dock. The app retains `LSUIElement` and accessory activation, background login behavior, window reuse and LaunchServices reopening.
+
+All 330 policy/controller/recovery checks pass; display control and the watchdog are unchanged from 1.1.2. All 11 native interface checks pass in an isolated preview application: background launch without visible windows, no Dock item, LaunchServices reopening the same process, foreground/key settings, no status-bar window, no minimization, complete content sizing, continued background lifetime after closing, and repeated reopening of the same window. These UI checks perform no display transactions. Earlier physical recovery and lock/unlock validation remains recorded below; no new physical cable or lock test is claimed for this UI change.
+
+The installed 1.2.0 window was visually checked and its accessibility tree exposed exactly one display switch, quit and the native window controls, with no visibility button or status menu. The saved automatic preference remained enabled (the positive UI switch remained OFF), and the window reported only the external display working. The old app and helper exited normally before replacement. The installed executable hash matches the packaged app; signature, DMG checksum and ZIP integrity verification passed.
+
 ## Version 1.1.2: automatic mode after unlock
 
 The user reported that the built-in stayed on after locking with Touch ID, leaving the Mac locked, and unlocking. Read-only diagnostics confirmed an active built-in and the same active external, while the preference remained OFF. The controller used permanent failure inhibition for recovery and did not observe lock/unlock or display sleep/wake; waking therefore could leave the saved automatic mode inhibited indefinitely.
@@ -103,8 +111,8 @@ The integration harness runs a full `NSApplication` event loop. A plain synchron
 - Close/open the lid; the pending restoration must survive and complete once the panel becomes active.
 - Quit while off; the built-in must return and the helper must exit.
 - Remove external during a transition; the built-in must recover.
-- Restart macOS with the preference OFF and login approval granted; ScreenOff must start without opening settings. The hidden-icon preference must remain in effect.
-- Hide the icon, close settings, then open ScreenOff through Spotlight; settings must reappear without a second process or an unwanted status item.
+- Restart macOS with the preference OFF and login approval granted; ScreenOff must start without opening settings or creating icons in the menu bar or Dock.
+- Close settings, then open ScreenOff through Spotlight; settings must reappear without a second process or icons in the menu bar or Dock.
 - Try a mirrored layout; the app must leave it unchanged and explain the prerequisite.
 
 These physical hotplug, sleep and login scenarios require manual hardware interaction; unit checks alone do not establish them.

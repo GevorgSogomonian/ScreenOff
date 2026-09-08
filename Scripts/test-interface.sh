@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 APP="$PWD/.build/ScreenOffInterfaceTests.app"
 mkdir -p .build/module-cache "$APP/Contents/MacOS"
-xcrun swiftc -swift-version 5 -D POPOVER_TEST -module-cache-path .build/module-cache \
+xcrun swiftc -swift-version 5 -D INTERFACE_TEST -module-cache-path .build/module-cache \
     Sources/ScreenOffCore/*.swift Sources/ScreenOff/*.swift Tests/InterfaceIntegration.swift \
     -o "$APP/Contents/MacOS/ScreenOffInterfaceTests"
 cat > "$APP/Contents/Info.plist" <<'PLIST'

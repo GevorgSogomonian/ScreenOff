@@ -21,19 +21,14 @@ enum InterfaceIntegration {
         setbuf(stdout, nil)
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        let suite = "com.gevorg.screenoff.interface-tests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        let preferences = InterfacePreferences(preferences: defaults)
-        expect(!preferences.statusItemHidden, "fresh preferences show the icon")
-        preferences.setStatusItemHidden(true)
-        let reloaded = InterfacePreferences(preferences: defaults)
-        expect(reloaded.statusItemHidden, "hidden preference survives model recreation")
-        let delegate = AppDelegate(previewOnly: true, backgroundLaunch: true, interface: reloaded)
+        let delegate = AppDelegate(previewOnly: true, backgroundLaunch: true)
         app.delegate = delegate
         Task { @MainActor in
             await pause()
-            expect(!delegate.testStatusItemExists && delegate.testSettingsWindow == nil,
-                   "hidden background startup creates neither icon nor window")
+            expect(delegate.testSettingsWindow == nil && !app.windows.contains(where: \.isVisible),
+                   "background startup creates no visible windows")
+            expect(app.activationPolicy() == .accessory,
+                   "background application has no Dock item")
             // NSWorkspace sends the same LaunchServices reopen event used by
             // Spotlight/Finder. It must target this already-running process.
             let configuration = NSWorkspace.OpenConfiguration()
@@ -47,8 +42,13 @@ enum InterfaceIntegration {
             }
             await pause()
             guard let window = delegate.testSettingsWindow else { fatalError("Reopen did not create settings") }
-            expect(window.isVisible && !delegate.testStatusItemExists,
-                   "reopen displays settings while keeping the icon hidden")
+            expect(window.isVisible && window.isKeyWindow,
+                   "reopen brings settings to the foreground")
+            expect(app.activationPolicy() == .accessory &&
+                   !app.windows.contains(where: { $0.level == .statusBar }),
+                   "opening settings creates no Dock item or status bar window")
+            expect(!window.styleMask.contains(.miniaturizable),
+                   "settings cannot be minimized into the Dock")
             let content = window.contentView!
             expect(content.bounds.width >= content.fittingSize.width && content.bounds.height >= content.fittingSize.height,
                    "settings window fits the complete content")
@@ -56,23 +56,19 @@ enum InterfaceIntegration {
             window.performClose(nil)
             expect(!window.isVisible && !delegate.applicationShouldTerminateAfterLastWindowClosed(app),
                    "closing settings leaves the background app running")
-            _ = delegate.applicationShouldHandleReopen(app, hasVisibleWindows: false)
+            do {
+                let reopened = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL,
+                                                                            configuration: configuration)
+                expect(reopened.processIdentifier == getpid(), "relaunch after closing keeps the same process")
+            } catch {
+                fatalError("LaunchServices second reopen failed: \(error)")
+            }
             await pause()
             expect(delegate.testSettingsWindow === originalWindow && window.isVisible,
                    "reopening reuses the same settings window")
-            delegate.testChangeVisibility()
-            await pause()
-            expect(delegate.testStatusItemExists && !InterfacePreferences(preferences: defaults).statusItemHidden,
-                   "show button restores the icon and persists visibility")
-            window.orderOut(nil)
-            delegate.testShowPopover()
-            await pause()
-            expect(delegate.testPopover.isShown, "restored status item opens its popover")
-            delegate.testChangeVisibility()
-            await pause()
-            expect(!delegate.testPopover.isShown && !delegate.testStatusItemExists && window.isVisible,
-                   "hiding from the popover removes the anchor and opens settings")
-            defaults.removePersistentDomain(forName: suite)
+            expect(app.activationPolicy() == .accessory &&
+                   app.windows.filter(\.isVisible).count == 1,
+                   "repeated reopen leaves one window and no Dock item")
             window.orderOut(nil)
             print("PASS: \(checks) native interface checks; no display transactions")
             exit(0)

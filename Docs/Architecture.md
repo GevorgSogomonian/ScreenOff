@@ -1,6 +1,6 @@
 # Architecture
 
-ScreenOff is a macOS accessory application. It has an optional status item and a reusable settings window. There is no Dock item, package dependency, network client, system extension, privileged service, or telemetry.
+ScreenOff is a macOS accessory application with one reusable settings window. It creates no status item or Dock item. There is no package dependency, network client, system extension, privileged service, or telemetry.
 
 ## Components
 
@@ -15,17 +15,13 @@ starts a replacement helper directly in recovery mode. A restored panel does not
 receive a redundant enable transaction. EOF cancels the read source, while the
 timer continues recovery. A retired helper is allowed to finish before another
 disable can start, preventing competing enable/disable transactions.
-- `MenuView` / `AppDelegate`: one positive preference switch, live status, a hide/show button, and a quit button. The same view/controller backs a native popover and a reusable settings window. `InterfacePreferences` stores the independent `hideStatusItem` preference. Hiding removes the actual `NSStatusItem` and opens settings so the controls remain reachable.
-- LaunchServices reopen events (Spotlight/Finder) display the settings window even while the icon is hidden. Closing this window does not stop display control. An explicit foreground launch opens settings; a login-item launch (the Apple event login marker) or `--background` remains quiet. A second process forwards a distributed show-settings notification to the existing instance and exits.
+- `SettingsView` / `AppDelegate`: one positive preference switch, live status, and a quit button in a reusable settings window. The status item, popover and visibility preference implementation have been removed. The obsolete `hideStatusItem` value in existing preferences is ignored. `LSUIElement` and the accessory activation policy keep the app out of the Dock, including while settings is open. The window cannot be minimized into the Dock.
+- LaunchServices reopen events (Spotlight/Finder) display the settings window. Closing this window does not stop display control. An explicit foreground launch opens settings; a login-item launch (the Apple event login marker) or `--background` remains quiet. A second process forwards a distributed show-settings notification to the existing instance and exits.
 - The UI preference is the inverse of the existing `automaticDisplayOff` key: ON means both displays, OFF means automatic disabling. Existing installations need no preference migration. `setAutomatic` clears temporary recovery overrides; it remains an internal controller operation. Preview instances cannot evaluate display changes or register login items.
 
-The hosting controller explicitly publishes its preferred content size. After
-presentation and every native window resize, the popover's top is anchored to
-the status button converted into global screen coordinates. The native horizontal
-placement is preserved so the arrow remains aligned. Screen-configuration changes
-close the old popover, letting the next click acquire the current status-item
-window and display scale. This avoids the vertical gap after status/login text
-shrinks or the built-in screen is disconnected.
+The hosting controller explicitly publishes its preferred content size. The
+settings window fits its content, including multiline recovery or login notices.
+It is centered on reopening and constrained to the current screen when resized.
 
 ## Recovery scheduling and energy
 
@@ -37,7 +33,7 @@ Lock/unlock uses the distributed `com.apple.screenIsLocked` and `com.apple.scree
 
 Failed recovery transactions previously entered the same immediate rollback path as a failed disable. Their WindowServer callbacks could trigger further recovery evaluations with no cooldown, creating a transaction/callback loop. Recovery now records the attempt before calling the API; error handling cannot duplicate it. If the lid closes during verification, polling stops and the obligation persists. A failed disable still gets an immediate rollback attempt.
 
-Unchanged snapshots/notices are not published to SwiftUI. Closed-lid waiting has no progress animation. The status icon changes only when the built-in state changes. Settings sizing is coalesced, skipped for closed windows, and applied only when dimensions actually differ. Timers allow coalescing (0.5 s controller, 0.2 s heartbeat, 0.1 s helper); their existing safety cadence is retained.
+Unchanged snapshots/notices are not published to SwiftUI. Closed-lid waiting has no progress animation. Settings sizing is coalesced, skipped for closed windows, and applied only when dimensions actually differ. Timers allow coalescing (0.5 s controller, 0.2 s heartbeat, 0.1 s helper); their existing safety cadence is retained.
 
 ## Display transaction
 
@@ -58,6 +54,6 @@ Private ABI changes cannot be completely detected by symbol lookup. Verified onl
 
 ## CLI
 
-`--diagnose` is read-only and emits OS version, symbol availability, and topology JSON. `--recover` tells an existing instance to suspend automation and also invokes independent recovery. `--hardware-test` exercises the guarded menu transaction for two seconds and restores it. CLI modes do not change the saved automatic preference.
+`--diagnose` is read-only and emits OS version, symbol availability, and topology JSON. `--recover` tells an existing instance to suspend automation and also invokes independent recovery. `--hardware-test` exercises the guarded display transaction for two seconds and restores it. CLI modes do not change the saved automatic preference.
 
-`--restore-on-launch` starts the menu application with a temporary manual-on choice while preserving the automatic preference. It is useful after an update or a recovery. The saved switch position remains unchanged; choosing a mode again clears this temporary override. `--background` suppresses the initial settings window without affecting subsequent Spotlight reopen events.
+`--restore-on-launch` starts the application with a temporary manual-on choice while preserving the automatic preference. It is useful after an update or a recovery. The saved switch position remains unchanged; choosing a mode again clears this temporary override. `--background` suppresses the initial settings window without affecting subsequent Spotlight reopen events.

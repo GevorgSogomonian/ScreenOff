@@ -1,9 +1,7 @@
 import SwiftUI
 
-struct MenuView: View {
+struct SettingsView: View {
     @ObservedObject var controller: DisplayController
-    @ObservedObject var interface: InterfacePreferences
-    var changeVisibility: () -> Void
     var quit: () -> Void
     private let accent = Color(red: 0.08, green: 0.56, blue: 0.46)
 
@@ -78,19 +76,6 @@ struct MenuView: View {
             }
             .padding(.top, 14)
 
-            Divider().padding(.vertical, 14)
-            Button(action: changeVisibility) {
-                Label(interface.statusItemHidden ? "Показать значок в строке меню" : "Скрыть значок из строки меню",
-                      systemImage: interface.statusItemHidden ? "eye" : "eye.slash")
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(accent)
-            .accessibilityIdentifier("statusItemVisibilityButton")
-            Text("Открыть настройки: Spotlight → ScreenOff")
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .padding(.top, 7)
         }
         .padding(20)
         .frame(width: 374)
