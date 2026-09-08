@@ -52,6 +52,32 @@ enum InterfaceIntegration {
             let content = window.contentView!
             expect(content.bounds.width >= content.fittingSize.width && content.bounds.height >= content.fittingSize.height,
                    "settings window fits the complete content")
+            // deactivate() alone can immediately reactivate the frontmost app.
+            // Give focus to a separate app to exercise AppKit's real behavior.
+            let fixtureURL = Bundle.main.bundleURL.deletingLastPathComponent()
+                .appendingPathComponent("ScreenOffFocusFixture.app")
+            let fixture: NSRunningApplication
+            do {
+                fixture = try await NSWorkspace.shared.openApplication(at: fixtureURL,
+                                                                       configuration: configuration)
+            } catch {
+                fatalError("Focus fixture launch failed: \(error)")
+            }
+            await pause()
+            expect(fixture.isActive && !app.isActive && !window.occlusionState.contains(.visible),
+                   "switching to another app removes settings from the screen")
+            do {
+                let reopened = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL,
+                                                                            configuration: configuration)
+                expect(reopened.processIdentifier == getpid(), "reopen after deactivation keeps the same process")
+            } catch {
+                fatalError("LaunchServices reopen after deactivation failed: \(error)")
+            }
+            await pause()
+            expect(delegate.testSettingsWindow === window && window.isKeyWindow &&
+                   window.occlusionState.contains(.visible),
+                   "reopen restores the same settings window after automatic hiding")
+            expect(fixture.terminate(), "isolated focus fixture terminates normally")
             let originalWindow = window
             window.performClose(nil)
             expect(!window.isVisible && !delegate.applicationShouldTerminateAfterLastWindowClosed(app),

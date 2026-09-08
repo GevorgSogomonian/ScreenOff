@@ -6,6 +6,16 @@
 
 `bash Scripts/build.sh` compiles both executables, produces the icon and app bundle, verifies the code signature with `codesign --verify --deep --strict`, and lints Info.plist.
 
+## Version 1.2.2: dismiss settings when switching applications
+
+The user reported that the accessory app's settings window remained on screen when switching Stage Manager groups. The first installed candidate (1.2.1, not published) removed `moveToActiveSpace` and unconditional front ordering, and set `primary`, `managed`, and `fullScreenNone`. The user confirmed that this alone did not fix the issue. Stage Manager was enabled on the target Mac.
+
+Version 1.2.2 additionally uses native `hidesOnDeactivate`. Settings is removed from the screen when another application becomes active; this also applies to ordinary focus changes, including within a Stage Manager group. Reopening through Spotlight/LaunchServices restores the same window. This is automatic dismissal of the accessory window, not normal Stage Manager group membership. No polling, Dock icon or display-control change is introduced.
+
+All 15 native interface checks passed with Stage Manager enabled. An isolated second application takes focus, and the harness checks that ScreenOff's preview is inactive and its window is no longer visible according to AppKit's occlusion state. Reopening through LaunchServices returns the same PID and window, makes it key and visible again, and the fixture terminates normally. A direct `NSApplication.deactivate()` without a focus recipient was unsuitable for this test: the application immediately became active again. The two-app check exercises actual focus handoff, without controlling physical displays or changing the user's preferences.
+
+The signed 1.2.2 app was installed after the old app and recovery helper exited normally. Its executable hash matches the packaged app and the automatic preference was preserved. DMG checksum and ZIP integrity verification passed.
+
 ## Version 1.2.0: window-only interface
 
 The status item, popover, visibility preference implementation and their geometry tests were removed. The settings window now contains one display preference, current status and quit. It cannot be minimized into the Dock. The app retains `LSUIElement` and accessory activation, background login behavior, window reuse and LaunchServices reopening.

@@ -23,6 +23,18 @@ The hosting controller explicitly publishes its preferred content size. The
 settings window fits its content, including multiline recovery or login notices.
 It is centered on reopening and constrained to the current screen when resized.
 
+The sole window explicitly uses `primary`, `managed` and `fullScreenNone`
+collection behaviors, without `moveToActiveSpace` or unconditional front ordering.
+Those flags alone did not fix the persistent agent window on the user's Mac.
+`hidesOnDeactivate` therefore hides settings when another application takes
+focus, including a Stage Manager group switch. This also applies outside Stage
+Manager and within a group; it is automatic dismissal of an accessory window,
+not a claim that the app has ordinary Stage Manager group membership. Spotlight
+reopening activates the app and restores the same window. No focus-polling timer,
+new Dock item, or change to display-control lifetime is introduced.
+See [Apple's Stage Manager overview for AppKit](https://developer.apple.com/videos/play/wwdc2022/10074/)
+and [hidesOnDeactivate](https://developer.apple.com/documentation/appkit/nswindow/hidesondeactivate).
+
 ## Recovery scheduling and energy
 
 `SessionResumeState` separates screen locking/session inactivity, display sleep, and system sleep. An observed inactive-to-active cycle creates one request to reapply the saved display preference after a two-second settling interval. The controller consumes it only after recovery is confirmed, an external is usable, and the old helper has exited. Short lock cycles that leave the panel off consume their request without an extra transaction. Duplicate notifications cannot clear failure inhibition repeatedly. Explicit recovery/manual-on holds retain priority.

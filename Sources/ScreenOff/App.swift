@@ -81,7 +81,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.titlebarAppearsTransparent = true
             window.isReleasedWhenClosed = false
             window.isRestorable = false
-            window.collectionBehavior = [.moveToActiveSpace]
+            // Agent apps can remain outside Stage Manager sets even with a
+            // primary window. Hide this short-lived settings UI when another
+            // app takes focus; display control keeps running in the background.
+            window.hidesOnDeactivate = true
+            // Prefer ordinary window management. moveToActiveSpace would
+            // explicitly give this window auxiliary behavior in Stage Manager.
+            window.collectionBehavior = [.primary, .managed, .fullScreenNone]
             window.contentViewController = host
             settingsWindow = window
             resizeSettingsWindow()
@@ -91,7 +97,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !window.isVisible { window.center() }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        window.orderFrontRegardless()
         DispatchQueue.main.async { [weak self] in self?.resizeSettingsWindow() }
     }
 
