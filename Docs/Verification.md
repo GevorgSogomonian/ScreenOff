@@ -2,9 +2,23 @@
 
 ## Automated checks
 
-`bash Scripts/test.sh` now runs 330 checks: 54 policy/lease checks and 276 checks of the production controller, recovery target selection and persistent watchdog recovery engine with injected hardware. These cannot issue real display transactions. The former popover geometry checks were removed with the menu bar interface in 1.2.0.
+`bash Scripts/test.sh` now runs 357 checks: 54 policy/lease checks and 303 checks of the production controller, recovery target selection and persistent watchdog recovery engine with injected hardware. These cannot issue real display transactions. The former popover geometry checks were removed with the menu bar interface in 1.2.0.
 
 `bash Scripts/build.sh` compiles both executables, produces the icon and app bundle, verifies the code signature with `codesign --verify --deep --strict`, and lints Info.plist.
+
+## Version 1.3.1: avoid overlapping recovery configurations
+
+The user reported a 12-hour Energy Impact value of 456.11 after leaving the Mac with its lid closed for several hours. The installed 1.3.0 main process had accumulated 36 minutes 42.64 seconds of CPU time in approximately 4 hours 29 minutes. A later five-second sample showed it mostly idle; current idle behavior did not explain the earlier accumulated work.
+
+A system resource report captured both the 1.3.0 main process and its helper inside `DisplayHardware.setBuiltIn` and `SLSCompleteDisplayConfigurationWithOption`. The main process was reached through both recovery transition and failure handling. Its unified log contained 195,382 “Waiting for previous reconfig to complete” messages. These observations identified overlapping recovery calls during display reconfiguration, a path the earlier single-process callback-loop test did not exercise.
+
+Restoration is now delegated to the live or retiring helper. The main app observes completion and attempts local recovery only if no helper owns it and replacement startup fails. Sleep handling and quit also delegate; restore commands are sent at most once per helper. Closed-lid recovery issues zero configuration commands, with another lid check at the hardware boundary. Lid reopening creates a settling/resume opportunity even if the Mac never slept. The CLI recovery command observes an existing owner before attempting standalone recovery.
+
+All 357 policy/controller/recovery checks pass, including stalled-helper ownership, repeated removal events, retiring-helper exclusion, fallback recovery, shutdown handoff, a simulated eight-hour closed lid and reopening without sleep notifications. The two-second night probe reports zero enable calls and two UI publications. All 15 native window checks also passed.
+
+The new delegated recovery path passed a physical guarded disable/enable test on the target Mac: the built-in display became offline with the external active, then returned online. The helper also passed restore-command, pipe-EOF and restore-argument integration checks with the built-in already active. The final build includes an additional simulated regression for lid reopening without system sleep. These are bounded checks, not a full overnight energy measurement.
+
+The installed 1.3.1 executables match the packaged binaries and the saved automatic preference remains enabled. The existing README screenshot is preserved.
 
 ## Version 1.3.0: English interface and documentation
 

@@ -6,10 +6,17 @@ struct SessionResumeState {
     private(set) var sessionActive = true
     private(set) var screensAwake = true
     private(set) var systemAwake = true
+    private(set) var lidOpen = true
     private(set) var pending = false
     private var readyAt: TimeInterval?
 
-    var suspended: Bool { !sessionActive || !screensAwake || !systemAwake }
+    var suspended: Bool { !sessionActive || !screensAwake || !systemAwake || !lidOpen }
+
+    mutating func setLidOpen(_ open: Bool, now: TimeInterval) {
+        guard lidOpen != open else { return }
+        lidOpen = open
+        changed(now: now)
+    }
 
     mutating func setSessionActive(_ active: Bool, now: TimeInterval) {
         guard sessionActive != active else { return }

@@ -109,6 +109,9 @@ final class DisplayHardware: DisplayHardwareAccess {
             throw DisplayFailure.unavailable("SLSConfigureDisplayEnabled / SLSGetDisplayList")
         }
         let current = try snapshot()
+        // Do not contend with macOS clamshell reconfiguration. Recovery must
+        // wait for the lid to open, including explicit CLI recovery requests.
+        guard !current.lidClosed else { throw DisplayFailure.lidClosed }
         guard let targetID = recoveryTarget.resolve(in: current, on: on, recovery: recovery)
         else { throw DisplayFailure.noBuiltIn }
         // Online alone is insufficient during recovery (closed lid/inactive
@@ -120,6 +123,8 @@ final class DisplayHardware: DisplayHardwareAccess {
             guard !current.externalDisplays.isEmpty else { throw DisplayFailure.noExternal }
             guard !current.displays.contains(where: { $0.online && $0.mirrored }) else { throw DisplayFailure.mirroring }
         }
+        // The lid may have closed while obtaining the display configuration.
+        guard !isLidClosed() else { throw DisplayFailure.lidClosed }
         var configuration: CGDisplayConfigRef?
         let begin = CGBeginDisplayConfiguration(&configuration)
         guard begin == .success, let configuration else {

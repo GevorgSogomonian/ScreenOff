@@ -12,10 +12,11 @@ struct RecoveryAttemptGate {
 
     mutating func shouldAttempt(in state: DisplaySnapshot, now: TimeInterval) -> Bool {
         if state.lidClosed {
-            guard !attemptedWithClosedLid else { return false }
-            // Clear the software disable once; physical activation must wait
-            // for opening the lid. Repeated errors/events cannot rearm this.
+            // WindowServer may still be processing the lid transition. Even
+            // one synchronous enable can spin inside its configuration API
+            // until the lid opens. Keep the obligation without a transaction.
             attemptedWithClosedLid = true
+            return false
         } else {
             if attemptedWithClosedLid || lastState != state { nextAttempt = -.infinity }
             attemptedWithClosedLid = false

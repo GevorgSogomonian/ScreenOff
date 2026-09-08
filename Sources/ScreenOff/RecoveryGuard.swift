@@ -17,6 +17,7 @@ final class RecoveryGuard: RecoveryGuarding {
     private var output: FileHandle?
     private var heartbeat: Timer?
     private var retiring: [Process] = []
+    private var restoreSent = false
 
     var isRunning: Bool { process?.isRunning == true }
     var canStart: Bool { retiring.allSatisfy { !$0.isRunning } }
@@ -52,6 +53,7 @@ final class RecoveryGuard: RecoveryGuarding {
         commands.fileHandleForReading.closeFile()
         replies.fileHandleForWriting.closeFile()
         process = child
+        restoreSent = restoring
         input = commands.fileHandleForWriting
         output = replies.fileHandleForReading
         var fd = pollfd(fd: replies.fileHandleForReading.fileDescriptor, events: Int16(POLLIN), revents: 0)
@@ -79,9 +81,9 @@ final class RecoveryGuard: RecoveryGuarding {
     }
 
     func requestRestore() {
-        guard isRunning, let input else { return }
+        guard !restoreSent, isRunning, let input else { return }
         var command: UInt8 = 2
-        _ = Darwin.write(input.fileDescriptor, &command, 1)
+        if Darwin.write(input.fileDescriptor, &command, 1) == 1 { restoreSent = true }
     }
 
     func stop() {
@@ -95,5 +97,6 @@ final class RecoveryGuard: RecoveryGuarding {
         // it forcibly: it may still be rescuing the panel after an app failure.
         if let process, process.isRunning { retiring.append(process) }
         process = nil
+        restoreSent = false
     }
 }
