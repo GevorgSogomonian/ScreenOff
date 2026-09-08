@@ -16,6 +16,8 @@ The previous eight-hour closed-lid regression and recorded headless cable recove
 
 All 11 native interface checks passed, including hidden-icon reopening through LaunchServices; all four popover checks passed with a 2.5-point gap on the current monitor configuration. The 1.1.2 app was installed with the user's preferences preserved. Code-signature verification, DMG verification and ZIP integrity checks passed.
 
+**Physical lock/unlock validation passed in the installed 1.1.2 app.** With the preference OFF and the external connected, the user locked the Mac using Touch ID, waited for the external to sleep, and unlocked it. A separate read-only observer recorded the built-in OFF before locking, the active external count dropping to zero while locked, and the built-in ON with one active external immediately after unlock. About two to three seconds later, the built-in was OFF again. The user confirmed the automatic disabling worked. The observer issued no display transactions and exited after confirming the result.
+
 ## Version 1.1.1: overnight energy use
 
 The user reported a 12-hour energy score of 771.55 after leaving the Mac on mains power, lid closed and external monitor connected but asleep. The Mac was configured to remain awake. Read-only process inspection found 150 minutes 38 seconds of CPU time accumulated by the 1.1.0 main process over about 7.5 hours. A sample taken after the lid was open showed it mostly idle; it cannot reconstruct the overnight call stacks.
