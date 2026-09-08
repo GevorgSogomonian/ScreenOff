@@ -20,6 +20,10 @@ The new delegated recovery path passed a physical guarded disable/enable test on
 
 The installed 1.3.1 executables match the packaged binaries and the saved automatic preference remains enabled. The existing README screenshot is preserved.
 
+**Physical closed-lid follow-up passed in the installed 1.3.1 app.** With the external monitor connected and active, the user closed the lid and later reopened it. During 108.60 measured closed-lid seconds, the main process and helper accumulated 0.14 CPU seconds in total: approximately 0.129% of one CPU. Four-second samples of each process were dominated by run-loop waiting and contained no display-configuration frames. A targeted unified-log query found none of the previous reconfiguration-wait messages in the new processes.
+
+After reopening, the original helper exited, a new helper armed, and read-only diagnostics confirmed the built-in display offline/inactive with one external active, matching the saved OFF preference. This was a short physical lid-close/open check with an awake external display, not a full night with the external display asleep and not a measurement of battery wattage.
+
 ## Version 1.3.0: English interface and documentation
 
 All 330 policy/controller/recovery checks and all 15 native interface checks pass after translating application text. Display-control behavior, recovery, login preferences and window lifecycle are unchanged. The interface harness uses isolated preview applications and performs no physical display transactions. No new physical cable-removal or lock/unlock test is claimed for this translation update.
