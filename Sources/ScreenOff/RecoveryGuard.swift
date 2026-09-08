@@ -7,6 +7,8 @@ protocol RecoveryGuarding: AnyObject {
     var canStart: Bool { get }
     func start(restoring: Bool) throws
     func requestRestore()
+    func requestDisable()
+    func remember(_ snapshot: DisplaySnapshot)
     func stop()
 }
 
@@ -18,6 +20,7 @@ final class RecoveryGuard: RecoveryGuarding {
     private var heartbeat: Timer?
     private var retiring: [Process] = []
     private var restoreSent = false
+    private var seed: DisplayInfo?
 
     var isRunning: Bool { process?.isRunning == true }
     var canStart: Bool { retiring.allSatisfy { !$0.isRunning } }
@@ -46,6 +49,9 @@ final class RecoveryGuard: RecoveryGuarding {
         }
         child.executableURL = executable
         child.arguments = ["--watch", String(getpid())] + (restoring ? ["--restore"] : [])
+        if let seed, let data = try? JSONEncoder().encode(seed) {
+            child.arguments! += ["--seed", data.base64EncodedString()]
+        }
         child.standardInput = commands
         child.standardOutput = replies
         child.standardError = FileHandle.nullDevice
@@ -84,6 +90,16 @@ final class RecoveryGuard: RecoveryGuarding {
         guard !restoreSent, isRunning, let input else { return }
         var command: UInt8 = 2
         if Darwin.write(input.fileDescriptor, &command, 1) == 1 { restoreSent = true }
+    }
+
+    func requestDisable() {
+        guard !restoreSent, isRunning, let input else { return }
+        var command: UInt8 = 3
+        _ = Darwin.write(input.fileDescriptor, &command, 1)
+    }
+
+    func remember(_ snapshot: DisplaySnapshot) {
+        if let panel = snapshot.builtIn { seed = panel }
     }
 
     func stop() {

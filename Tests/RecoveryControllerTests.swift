@@ -1,7 +1,7 @@
 import AppKit
 import Combine
 
-/// Exercise the production controller and watchdog recovery loop with injected
+/// Exercise the production controller with an asynchronous recovery fixture with injected
 /// hardware. These tests never issue a real display transaction.
 final class FakeDisplayHardware: DisplayHardwareAccess {
     let supported = true
@@ -66,7 +66,7 @@ final class FakeRecoveryGuard: RecoveryGuarding {
     var stops = 0
     var startFails = false
     var hardware: FakeDisplayHardware?
-    var engine = WatchdogRecovery(retryDelay: 0)
+    var engine = SimulatedRecovery(retryDelay: 0)
     var clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     var automaticallyStep = true
     var retryDelay: TimeInterval = 0
@@ -74,7 +74,7 @@ final class FakeRecoveryGuard: RecoveryGuarding {
         if startFails { throw DisplayFailure.watchdog }
         starts.append(restoring)
         isRunning = true
-        engine = WatchdogRecovery(retryDelay: retryDelay)
+        engine = SimulatedRecovery(retryDelay: retryDelay)
     }
     func requestRestore() {
         restoreRequests += 1
@@ -87,6 +87,11 @@ final class FakeRecoveryGuard: RecoveryGuarding {
         defer { hardware.helperIsExecuting = false }
         _ = engine.step(using: hardware, now: clock())
     }
+    func requestDisable() {
+        guard isRunning else { return }
+        try? hardware?.setBuiltIn(on: false, recovery: false)
+    }
+    func remember(_ snapshot: DisplaySnapshot) {}
     func stop() { stops += 1; isRunning = false }
 }
 
@@ -120,7 +125,7 @@ enum RecoveryControllerTests {
         -> (DisplayController, FakeDisplayHardware, FakeRecoveryGuard) {
         let guardProcess = suppliedGuard ?? FakeRecoveryGuard()
         guardProcess.hardware = hardware
-        guardProcess.engine = WatchdogRecovery(retryDelay: recoveryRetryDelay)
+        guardProcess.engine = SimulatedRecovery(retryDelay: recoveryRetryDelay)
         guardProcess.retryDelay = recoveryRetryDelay
         guardProcess.clock = recoveryClock
         let controller = DisplayController(testing: true, hardware: hardware,
@@ -326,7 +331,6 @@ enum RecoveryControllerTests {
             expect(!confirmed && helper.restoreRequests > 0 && helper.stops == 1,
                    "quit with unavailable panel hands recovery to helper via command and EOF")
         }
-        testWatchdogRecovery()
         await testRecordedHotplug()
         await testNightRecovery()
         await testUnlockRecovery()
@@ -391,8 +395,11 @@ enum RecoveryControllerTests {
         expect(orphan.mainEnableCalls == 0, "failed helper cannot force closed-lid configuration")
         orphan.state = fixture(on: false, externals: [])
         await fallback.testEvaluate()
-        expect(orphan.mainEnableCalls == 1 && orphan.state.builtInIsRestored,
-               "no-helper fallback can still recover the only display after lid opening")
+        expect(orphan.mainEnableCalls == 0 && fallback.testRecoveryPending,
+               "failed helper startup never enters an unbounded UI configuration fallback")
+        brokenHelper.startFails = false
+        await fallback.testEvaluate()
+        expect(orphan.state.builtInIsRestored, "available replacement helper resumes recovery")
 
         let (sleeping, duringSleep, sleeper) = await disabled()
         sleeper.automaticallyStep = false
@@ -532,15 +539,18 @@ enum RecoveryControllerTests {
             let (controller, hardware, helper) = make(recoveryClock: { now })
             await controller.testEvaluate()
             controller.testSession(active: false)
+            expect(hardware.state.builtInIsRestored, "short lock immediately requests restoration")
+            await controller.testEvaluate()
             controller.testSession(active: true)
             now = 3
-            await controller.testEvaluate() // Built-in remained off for the entire short lock.
+            controller.testFinishSettling()
+            await controller.testEvaluate()
             helper.isRunning = false
             await controller.testEvaluate()
             now = 20
             controller.testFinishSettling()
             await controller.testEvaluate()
-            expect(hardware.state.builtInIsOn && hardware.calls.filter { !$0.on }.count == 1,
+            expect(hardware.state.builtInIsOn && hardware.calls.filter { !$0.on }.count == 2,
                    "completed short lock leaves no stale resume ticket for a later helper fault")
         }
     }
@@ -575,23 +585,6 @@ enum RecoveryControllerTests {
         expect(hardware.state.builtInIsRestored && !controller.testRecoveryPending,
                "opening lid and removing cable restores without a system wake event")
         withExtendedLifetime(observation) {}
-
-        var recovery = WatchdogRecovery()
-        let independent = FakeDisplayHardware(fixture(on: false, lid: true, externalActive: false))
-        independent.enableFails = true
-        recovery.request()
-        for tick in 0...38_400 {
-            recovery.request() // Repeated IPC/events cannot reset the gate.
-            _ = recovery.step(using: independent, now: Double(tick) * 0.75)
-        }
-        expect(independent.calls.isEmpty && recovery.requested,
-               "independent helper also waits quietly through an eight-hour closed lid")
-        independent.enableFails = false
-        independent.state = fixture(on: false, externals: [])
-        expect(!recovery.step(using: independent, now: 28_801) && independent.state.builtInIsRestored,
-               "helper immediately retries when lid opens, even if parent is gone")
-        expect(!recovery.step(using: independent, now: 28_802), "first open-lid observation retains protection")
-        expect(recovery.step(using: independent, now: 28_803), "second open-lid observation completes recovery")
 
         let (retrying, failing, _) = make(recoveryRetryDelay: 2, recoveryClock: { now })
         await retrying.testEvaluate()
@@ -674,49 +667,5 @@ enum RecoveryControllerTests {
         await controller.testEvaluate()
         expect(!controller.testRecoveryPending && helper.stops == 1, "release after headless recovery is confirmed")
 
-        let independent = FakeDisplayHardware()
-        _ = try! independent.snapshot() // Helper handshake runs before off.
-        independent.simulateHeadlessRecovery = true
-        independent.state = headless
-        var recovery = WatchdogRecovery(retryDelay: 0)
-        recovery.request()
-        expect(!recovery.step(using: independent) && independent.recoveredIDs == [1],
-               "independent recovery uses the same remembered target")
-        expect(!recovery.step(using: independent), "headless recovery requires first active observation")
-        expect(recovery.step(using: independent), "headless recovery completes on second active observation")
-    }
-
-    static func testWatchdogRecovery() {
-        let hardware = FakeDisplayHardware(fixture(on: false))
-        var recovery = WatchdogRecovery(retryDelay: 0)
-        expect(!recovery.step(using: hardware) && hardware.calls.isEmpty, "unarmed helper stays idle")
-        recovery.request()
-        hardware.state = fixture(present: false, externals: [])
-        for _ in 0..<100 { expect(!recovery.step(using: hardware), "missing panel never completes helper") }
-        hardware.state = fixture(on: true, lid: true, externals: [])
-        for _ in 0..<10 { expect(!recovery.step(using: hardware), "closed lid cannot complete helper") }
-        hardware.state = fixture(on: false, externals: [])
-        hardware.enableFails = true
-        for _ in 0..<10 { expect(!recovery.step(using: hardware), "API error cannot complete helper") }
-        hardware.enableFails = false
-        expect(!recovery.step(using: hardware), "enable transaction yields to event loop")
-        expect(hardware.state.builtInIsRestored, "persistent helper eventually enables returning panel")
-        expect(!recovery.step(using: hardware), "one successful observation is insufficient")
-        hardware.readFails = true
-        expect(!recovery.step(using: hardware), "transient loss resets confirmation")
-        hardware.readFails = false
-        expect(!recovery.step(using: hardware), "confirmation restarts after transient loss")
-        expect(recovery.step(using: hardware), "two separated active observations complete helper")
-        expect(hardware.calls.allSatisfy { $0.on && $0.recovery }, "helper only enables session state")
-        var alreadyRestored = WatchdogRecovery(retryDelay: 0)
-        alreadyRestored.request()
-        hardware.calls = []
-        hardware.enableFails = true // SkyLight may reject redundant enables.
-        expect(!alreadyRestored.step(using: hardware), "already active panel still requires confirmation")
-        expect(alreadyRestored.step(using: hardware) && hardware.calls.isEmpty,
-               "confirmed active panel needs no redundant enable transaction")
-        expect(WatchdogRules.shouldRecover(parentAlive: true, pipeOpen: true,
-                                          heartbeatAge: 0, externalCount: 1, lidClosed: true),
-               "lid closure independently requests helper recovery")
     }
 }

@@ -1,71 +1,62 @@
 # Architecture
 
-ScreenOff is a macOS accessory application with one reusable settings window. It creates no status item or Dock item. There is no package dependency, network client, system extension, privileged service, or telemetry.
+ScreenOff is a macOS accessory application with one reusable settings window. It creates no status or Dock item and has no package dependency, network client, telemetry, privileged service or system extension.
 
-## Components
+## Display control and process boundaries
 
-- `DisplayHardware`: dynamically resolves SkyLight symbols; enumerates online and software-disabled displays, reads lid state, performs nonpersistent display transactions, and exposes recovery.
-- `DisplayPolicy`: pure state machine. Automatic mode and a temporary manual override determine desired built-in state. A changed external UUID set clears overrides. Built-in topology changes alone do not. A failure inhibits further automatic attempts until explicit user action or an external topology change.
-- `DisplayController`: main-actor serialization, SwiftUI state, display callbacks plus a two-second polling fallback, sleep/wake handling, verified transactions, and login registration. It starts a rescue process before every disable. Recovery responsibility survives missing panels, sleep, lid closure and failed transactions. An already-disabled panel discovered on launch is adopted for recovery. The helper is released only after the built-in is online and active with an open lid.
-- `RecoveryGuard`: launches the bundled helper using anonymous pipes. It requires a READY response before any off transaction, then sends a heartbeat once per second from the main run loop.
-- `ScreenOffWatchdog`: a separate process with its own WindowServer connection and AppKit event loop. It checks every 750 ms and watches pipe input asynchronously. EOF, an explicit restore command, parent death, 8 seconds without a heartbeat, lid closure, removal/disable callbacks for a protected external, or loss of the original external UUIDs requests recovery. `WatchdogRecovery` retries indefinitely, yielding between attempts, and exits only after two observations of an online, active built-in with an open lid. It only enables screens. No permanent launch agent is installed.
+There are two long-lived executables and a short-lived transaction process:
 
-The pipe protocol uses byte 1 for heartbeat and byte 2 for restoration; `--restore`
-starts a replacement helper directly in recovery mode. A restored panel does not
-receive a redundant enable transaction. EOF cancels the read source, while the
-timer continues recovery. A retired helper is allowed to finish before another
-disable can start, preventing competing enable/disable transactions.
-- `SettingsView` / `AppDelegate`: one positive preference switch, live status, and a quit button in a reusable settings window. The status item, popover and visibility preference implementation have been removed. The obsolete `hideStatusItem` value in existing preferences is ignored. `LSUIElement` and the accessory activation policy keep the app out of the Dock, including while settings is open. The window cannot be minimized into the Dock.
-- LaunchServices reopen events (Spotlight/Finder) display the settings window. Closing this window does not stop display control. An explicit foreground launch opens settings; a login-item launch (the Apple event login marker) or `--background` remains quiet. A second process forwards a distributed show-settings notification to the existing instance and exits.
-- The UI preference is the inverse of the existing `automaticDisplayOff` key: ON means both displays, OFF means automatic disabling. Existing installations need no preference migration. `setAutomatic` clears temporary recovery overrides; it remains an internal controller operation. Preview instances cannot evaluate display changes or register login items.
+- `DisplayController` owns the preference, SwiftUI state, display policy and login registration. It reads topology, requests changes through `RecoveryGuard`, and verifies the result. It never executes a display-configuration transaction, including during error handling, sleep, quit and CLI recovery.
+- `RecoveryGuard` starts `ScreenOffWatchdog`, requires a READY response before requesting a disable, and sends a main-run-loop heartbeat every second. It remembers a positively identified built-in display for recovery-only handoff. A retired supervisor must finish before another can start.
+- `ScreenOffWatchdog` is the durable rescue supervisor. Its main run loop processes IPC, lock/session events, display/system sleep, and an independent IOKit lid check every 750 ms. Read-only WindowServer queries run on a separate serial queue; a slow query cannot block lid events or worker cancellation.
+- `DisplayTransaction` starts a child using the same helper executable's `--transaction` mode. Only this disposable process calls the private configuration API. A three-second deadline kills and reaps a stuck child. Sleep or lid closure can cancel it earlier. The supervisor itself is never killed to cancel a transaction, and a new child cannot start before its predecessor is reaped.
+- `WatchdogSupervisor` contains the testable recovery state machine. Recovery remains armed until two separated observations confirm an online, active built-in display with the lid open.
 
-The hosting controller explicitly publishes its preferred content size. The
-settings window fits its content, including multiline recovery or login notices.
-It is centered on reopening and constrained to the current screen when resized.
+The private anonymous pipe protocol uses byte 1 for heartbeat, 2 for restore, and 3 for disable. Restore wins if both commands arrive together. EOF, parent death, eight seconds without heartbeat, lock, sleep, lid closure, or removal of a protected external requests recovery. Pipe EOF cancels its read source and does not spin. A separate private pipe supplies a JSON request to each transaction child. No sockets, elevated helpers or permanent launch daemons are installed.
 
-The sole window explicitly uses `primary`, `managed` and `fullScreenNone`
-collection behaviors, without `moveToActiveSpace` or unconditional front ordering.
-Those flags alone did not fix the persistent agent window on the user's Mac.
-`hidesOnDeactivate` therefore hides settings when another application takes
-focus, including a Stage Manager group switch. This also applies outside Stage
-Manager and within a group; it is automatic dismissal of an accessory window,
-not a claim that the app has ordinary Stage Manager group membership. Spotlight
-reopening activates the app and restores the same window. No focus-polling timer,
-new Dock item, or change to display-control lifetime is introduced.
-See [Apple's Stage Manager overview for AppKit](https://developer.apple.com/videos/play/wwdc2022/10074/)
-and [hidesOnDeactivate](https://developer.apple.com/documentation/appkit/nswindow/hidesondeactivate).
+## Lock, sleep and recovery
 
-## Recovery scheduling and energy
+Locking with Touch ID now requests restoration immediately, while the lid and display links may still be available. Both the controller and supervisor observe lock notifications. The saved OFF preference remains unchanged. A disable in progress is cancelled, and recovery cannot overlap its transaction child.
 
-`SessionResumeState` separates screen locking/session inactivity, display sleep, system sleep and lid closure. Lid reopening also creates a resume opportunity when the Mac remained awake on mains power. An observed inactive-to-active cycle creates one request to reapply the saved display preference after a two-second settling interval. The controller consumes it only after recovery is confirmed, an external is usable, and the old helper has exited. Short lock cycles that leave the panel off consume their request without an extra transaction. Duplicate notifications cannot clear failure inhibition repeatedly. Explicit recovery/manual-on holds retain priority.
+Display sleep, system sleep and lid closure suspend configuration attempts. They cancel an in-flight transaction without blocking the event loop. IOKit lid sensing does not require a responsive WindowServer connection. Opening the lid independently rearms recovery, even without AppKit wake/unlock events. The transaction child independently rechecks the lid and display sleep state before configuring anything; disabling additionally requires an active, unlocked console session.
 
-Lock/unlock uses the distributed `com.apple.screenIsLocked` and `com.apple.screenIsUnlocked` notifications; workspace display sleep/wake and session switching are observed separately on `NSWorkspace.notificationCenter`. The existing two-second evaluation also reads `CGSessionCopyCurrentDictionary` as a missed-event fallback, using the on-console flag and the runtime `CGSSessionScreenIsLocked` key. No additional polling timer is introduced. The lock notification names/key are undocumented system details; their current operation is checked on the target Mac. See [Apple's screen-wake notification](https://developer.apple.com/documentation/appkit/nsworkspace/screensdidwakenotification) and the notification registrations in [Hammerspoon](https://github.com/Hammerspoon/hammerspoon/blob/master/extensions/caffeinate/libcaffeinate_watcher.m).
+A timed-out transaction is **not retried continuously**. The supervisor retains its recovery obligation but waits for a real lid, sleep/wake, session or external-topology transition before trying again. Duplicate notifications and repeated restore commands cannot renew this permission. A worker that observes sleep before the supervisor similarly defers until a transition. Ordinary nonblocking errors have a two-second cooldown. A successful enable waits for fresh verification rather than repeatedly spawning children if a read-only query is stuck.
 
-`RecoveryAttemptGate` is shared by the controller and helper. A closed lid permits no display-configuration calls: even one call can spin inside SkyLight while macOS is changing its clamshell configuration. Recovery retains its obligation and waits for lid opening. The hardware layer also rechecks the lid before a transaction. Opening the lid rearms immediately, including when no system sleep/wake event occurred. With an open lid, retries of an unchanged topology are separated by at least two seconds. A changed snapshot bypasses this cooldown for prompt recovery. The gate uses monotonic uptime and repeated recovery requests do not reset it.
+`SessionResumeState` separates session activity, screen sleep, system sleep and lid state. After an inactive-to-active cycle, the UI waits for restoration, an available external, the previous helper's exit, and two seconds of settling before reapplying the saved preference. Duplicate wake events do not repeatedly clear failure inhibition. Manual recovery holds retain priority. An external topology change or explicit user choice can also reapply the preference.
 
-Failed recovery transactions previously entered the same immediate rollback path as a failed disable. Their WindowServer callbacks could trigger further recovery evaluations with no cooldown, creating a transaction/callback loop. Recovery now records the attempt before calling the API; error handling cannot duplicate it. If the lid closes during verification, polling stops and the obligation persists. A failed disable requests rollback from the helper. The main app never sends an enable while a live or retiring helper owns recovery; it can fall back to local recovery only if no such helper exists and replacement startup fails. Repeated restore commands are coalesced per helper process. Sleep notification handling and quit use this same ownership rule.
+Lock/unlock uses the distributed `com.apple.screenIsLocked` and `com.apple.screenIsUnlocked` notifications. Workspace sleep/wake and user-session changes are separate observations. The controller's existing two-second evaluation and the helper's asynchronous queries read `CGSessionCopyCurrentDictionary` as a missed-event fallback. Lock notification names and the runtime lock key are undocumented details. See [Apple's screen-wake notification](https://developer.apple.com/documentation/appkit/nsworkspace/screensdidwakenotification) and the notification registrations in [Hammerspoon](https://github.com/Hammerspoon/hammerspoon/blob/master/extensions/caffeinate/libcaffeinate_watcher.m).
 
-Unchanged snapshots/notices are not published to SwiftUI. Closed-lid waiting has no progress animation. Settings sizing is coalesced, skipped for closed windows, and applied only when dimensions actually differ. Timers allow coalescing (0.5 s controller, 0.2 s heartbeat, 0.1 s helper); their existing safety cadence is retained.
+## Hardware boundary
 
-## Display transaction
+1. Enumerate online and software-disabled displays. Prefer a currently identified built-in ID. Remember positively identified panel information in memory and pass it to the transaction process.
+2. `BuiltInRecoveryTarget` allows the remembered ID only for enabling a missing panel, with the lid open and no usable external. Refuse an ID currently assigned to another display. A fresh built-in ID always wins. Never disable using the fallback.
+3. Before disabling, require an active external, open lid, active unlocked console session, and no mirroring. Unknown lid state is unsafe. Recheck lid state immediately before the transaction and defer if all online displays are asleep.
+4. Dynamically resolve `SLSConfigureDisplayEnabled` / `CGSConfigureDisplayEnabled`. Begin, configure and complete the change in the disposable worker; cancel a configuration that fails before commit.
+5. Disable using `forAppOnly`; enable using `forSession`, so restoration survives the recovery process's exit. Neither path uses `permanently`. Brightness, gamma, resolutions, mirroring relationships and external enabled flags are unchanged.
+6. Verify topology independently. Function return codes alone never confirm recovery. A failed or partly applied disable retains the rescue obligation.
 
-1. Enumerate all displays again, including offline entries, and prefer the current `CGDisplayIsBuiltin` flag. Remember a positively identified built-in ID in memory. If unplugging removes the panel entirely, `BuiltInRecoveryTarget` permits an enable-only fallback to that ID with an open lid and no usable external. Refuse a cached ID assigned to any other current record. Never use the fallback for disabling.
-2. Before disabling, check open lid, active external, and absence of mirroring.
-3. Begin configuration; dynamically call `SLSConfigureDisplayEnabled` (fallback `CGSConfigureDisplayEnabled`); cancel on configuration failure.
-4. Commit `forAppOnly` when disabling and `forSession` when restoring. Do not change brightness, gamma, resolutions, mirror relationships, or the external display's enabled flag.
-5. Poll the fresh topology for up to 1.8 seconds. Never report an off state from the function return code alone. If an external disappears mid-transaction, request recovery.
-6. On error, inhibit repeat attempts and undo the operation. Keep the rescue helper available if verification of restoration fails.
+**Process exit is not a recovery mechanism.** An open-lid hardware probe on the affected macOS build showed that exiting the process that committed a private `forAppOnly` disable did not restore the panel. The implementation therefore always retains an independent enable/recovery path. Apple documents application-scoped lifetime for public display configuration, but that did not establish rollback for this private operation on the tested system.
 
-Recovery uses `forSession` so its enabled setting survives the recovering process's own exit. Neither executable ever commits with `permanently`. The helper can restore after lid opening without waiting for a missed system-wake notification. Main-process fallback waits until system sleep has ended. Once requested, it takes priority even if an external reconnects during recovery. Automatic disabling stays inhibited until an external topology change, an explicit user choice, or the single confirmed session-resume opportunity described above.
+## Interface and energy
+
+`SettingsView` has one positive preference: ON uses both displays, OFF automatically disables the built-in with an external. It is the inverse of the existing `automaticDisplayOff` default, so earlier preferences are preserved. The obsolete `hideStatusItem` default is ignored. Automatic mode uses `SMAppService.mainApp` login registration.
+
+`AppDelegate` creates one reusable window. Spotlight/Finder reopening returns to that window and process. Closing it leaves display control running. Foreground launches open settings; login launches and `--background` stay quiet. The window fits its content and is constrained to the screen. `LSUIElement` and the accessory activation policy prevent a Dock icon; no status item exists.
+
+The window uses `primary`, `managed`, `fullScreenNone` and `hidesOnDeactivate`. It hides when another application takes focus, including a Stage Manager group switch. This also applies outside Stage Manager; it is automatic dismissal of an accessory window, not a claim of ordinary Stage Manager group membership. See [Apple's Stage Manager overview](https://developer.apple.com/videos/play/wwdc2022/10074/) and [hidesOnDeactivate](https://developer.apple.com/documentation/appkit/nswindow/hidesondeactivate).
+
+Unchanged topology and notices do not publish SwiftUI updates. Closed-lid waiting has no progress animation. Window sizing is coalesced and skipped for invisible windows. Controller, heartbeat and helper timers allow coalescing. The helper does not query WindowServer or create transaction processes while it knows the lid is closed or the displays/system are asleep. There are no sleep-prevention assertions and no changes to the user's power settings.
 
 ## Limitations
 
-WindowServer's online/active state is evidence of a usable display link, not proof that a human can see that monitor. A monitor on another input or some docks may continue reporting an active link. The app cannot detect that reliably. Entries without vendor/model identity and the observed headless placeholder (vendor `0x756E6B6E`, model `0x76697274`, ASCII `unkn`/`virt`) cannot authorize disabling. Newly created placeholders cannot replace the helper's protected external UUIDs. Other virtual displays that present hardware identity may still count as externals.
+Online/active state indicates a display link, not that a person can see the monitor. Some docks and monitors on another input keep reporting an active link. Entries without vendor/model identity and the observed `unkn`/`virt` headless placeholder (vendor `0x756E6B6E`, model `0x76697274`) cannot authorize disabling. Other virtual displays that present hardware identity may still count as external.
 
-Private ABI changes cannot be completely detected by symbol lookup. Verified online/offline status demonstrates a disconnect, not an electrical power measurement of the panel. The intended supported hardware is Apple Silicon MacBooks. macOS still controls physical closed-lid power behavior; ScreenOff waits to clear its software disable until the lid opens, and retains recovery responsibility until the panel is active.
+Apple does not publish the display-disconnect API. Symbol availability does not prove ABI compatibility. A bounded client process prevents an indefinite client-side call and CPU loop; it cannot guarantee recovery from a failure inside WindowServer, the kernel or display firmware. Physical closed-lid behavior remains controlled by macOS. A successful topology check is not an electrical power measurement. See [Verification](Verification.md) for the exact tested scenarios and remaining physical-validation limits.
 
 ## CLI
 
-`--diagnose` is read-only and emits OS version, symbol availability, and topology JSON. `--recover` tells an existing instance to suspend automation and observes restoration for up to 12 seconds while the app or helper is alive. It invokes standalone recovery only when neither is running, avoiding a competing configuration. `--hardware-test` exercises the guarded display transaction for two seconds and restores it. CLI modes do not change the saved automatic preference.
-
-`--restore-on-launch` starts the application with a temporary manual-on choice while preserving the automatic preference. It is useful after an update or a recovery. The saved switch position remains unchanged; choosing a mode again clears this temporary override. `--background` suppresses the initial settings window without affecting subsequent Spotlight reopen events.
+- `--diagnose`: read-only OS, symbol availability and topology JSON.
+- `--recover`: asks an existing UI to hold the panel on, then observes recovery for up to 12 seconds. If no app/helper exists, starts a restore-only supervisor; it never configures displays directly. A pending supervisor survives the CLI's exit.
+- `--hardware-test`: explicitly exercises the same supervised disable/enable path with an open lid and active external. Quit the ordinary app first.
+- `--restore-on-launch`: temporary manual-on hold that preserves the saved preference until the next explicit mode selection.
+- `--background`: suppresses only the initial settings window.

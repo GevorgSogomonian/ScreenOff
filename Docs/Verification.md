@@ -2,9 +2,27 @@
 
 ## Automated checks
 
-`bash Scripts/test.sh` now runs 357 checks: 54 policy/lease checks and 303 checks of the production controller, recovery target selection and persistent watchdog recovery engine with injected hardware. These cannot issue real display transactions. The former popover geometry checks were removed with the menu bar interface in 1.2.0.
+`bash Scripts/test.sh` runs 271 checks: 54 policy/lease checks, 168 controller and recovery-target checks with simulated hardware, 38 checks of the production supervisor, and 11 checks of real subprocess timeout, cancellation, serialization and restart. The subprocess fixture imports no AppKit or CoreGraphics and cannot change a display. Old synchronous-watchdog tests were replaced by supervisor/process-boundary tests; the controller uses an explicitly named recovery simulation.
 
 `bash Scripts/build.sh` compiles both executables, produces the icon and app bundle, verifies the code signature with `codesign --verify --deep --strict`, and lints Info.plist.
+
+## Version 1.3.2: lock, closed lid and unplug recovery
+
+The user reported: external connected, built-in disabled, Touch ID lock, lid closed, external disconnected, then no usable wake and a forced reset. Reports on the affected M1 MacBook Pro (macOS 27 beta, build 26A5425a) record two button resets. This does not establish a kernel panic.
+
+Local unified logs captured a **single** recovery helper entering `SLSCompleteDisplayConfigurationWithOption` after display-sleep notifications and emitting roughly 1.45 million messages waiting for a previous reconfiguration across two helper instances. Therefore the 1.3.1 rule excluding concurrent main/helper enables did not bound a system call inside one helper. Its blocked main run loop could not process its pipe or lid/wake events.
+
+Version 1.3.2 requests restoration as soon as the session locks. The main app and durable helper never execute a configuration transaction; a disposable child does, with a three-second deadline. Sleep/lid transitions can cancel that child while the supervisor retains the verified panel ID. A timed-out call waits for a real activity/topology transition before retrying. Closed-lid and sleeping-display waiting sends no configuration commands. Read-only helper queries are separated from its event loop. The old synchronous CLI/UI fallback was removed too.
+
+The production supervisor tests cover the exact event order with both prompt and stuck restoration, closing the lid during a transaction, reaping before replacement, a missing/headless panel after unplug, reopening without AppKit wake/unlock callbacks, cached target handoff, eight hours with the lid closed, and eight hours of duplicate callbacks after a timeout. Real subprocess checks prove a deliberately non-returning child is killed/reaped and a subsequent recovery child can run. All 271 checks pass. These are simulations and process-liveness checks, not a physical forced-reset reproduction.
+
+A separate guarded hardware probe tested whether process exit could undo a private application-scoped disable. With an open lid and active external, the panel was disabled, its owner exited, and the panel did **not** return within the observation window. Explicit open-lid recovery succeeded. That rejected mechanism is not used by this release.
+
+The initial 1.3.2 guarded hardware check refused to disable because both physical displays were online but inactive/asleep. After the user unlocked the desktop with the lid open and external connected, the installed app passed the production guarded off/on check: the panel became offline with the external active, then returned online. A separate physical test sent disable through the supervisor, closed its heartbeat pipe and confirmed independent restoration while the parent remained alive. Restore command, EOF and restore-only startup also passed with the built-in already on. All 15 native interface checks passed, and GitHub CI passed on macOS 15.
+
+The 1.3.2 app is installed; both executable hashes match the signed package and the saved automatic preference is preserved. DMG verification and ZIP integrity checks passed. Automatic operation resumed after the ordinary hardware checks; read-only diagnostics confirmed built-in OFF with one active external. The README screenshot is unchanged.
+
+The exact lock → close lid → unplug sequence that required a forced reset has not been repeated with this version; ordinary open-lid tests must not be treated as validation of that physical sequence.
 
 ## Version 1.3.1: avoid overlapping recovery configurations
 

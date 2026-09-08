@@ -1,8 +1,8 @@
 import Foundation
 
-/// A durable obligation: keep retrying across unavailable panels, API errors,
-/// sleep and lid closure. Only a verified, open-lid active panel completes it.
-struct WatchdogRecovery {
+/// Fake asynchronous recovery backend for controller tests. Production recovery
+/// uses WatchdogSupervisor and a bounded DisplayTransaction child instead.
+struct SimulatedRecovery {
     private(set) var requested = false
     private var consecutiveRestored = 0
     private var attempts: RecoveryAttemptGate
@@ -11,8 +11,6 @@ struct WatchdogRecovery {
 
     mutating func request() { requested = true }
 
-    /// Called on the helper's live AppKit run loop. Never blocks the event loop
-    /// waiting for WindowServer and never disables any display.
     mutating func step(using hardware: any DisplayHardwareAccess,
                        now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
         guard requested else { return false }

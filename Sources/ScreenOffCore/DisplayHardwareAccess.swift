@@ -5,7 +5,6 @@ protocol DisplayHardwareAccess: AnyObject {
     var resolvedSymbol: String? { get }
     func snapshot() throws -> DisplaySnapshot
     func setBuiltIn(on: Bool, recovery: Bool) throws
-    func recover() -> Bool
 }
 
 extension DisplayHardwareAccess {
