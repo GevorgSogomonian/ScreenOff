@@ -4,6 +4,7 @@ import Darwin
 @MainActor
 protocol RecoveryGuarding: AnyObject {
     var isRunning: Bool { get }
+    var canStart: Bool { get }
     func start(restoring: Bool) throws
     func requestRestore()
     func stop()
@@ -18,6 +19,7 @@ final class RecoveryGuard: RecoveryGuarding {
     private var retiring: [Process] = []
 
     var isRunning: Bool { process?.isRunning == true }
+    var canStart: Bool { retiring.allSatisfy { !$0.isRunning } }
 
     func start(restoring: Bool = false) throws {
         if isRunning {

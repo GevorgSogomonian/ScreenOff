@@ -29,6 +29,10 @@ shrinks or the built-in screen is disconnected.
 
 ## Recovery scheduling and energy
 
+`SessionResumeState` separates screen locking/session inactivity, display sleep, and system sleep. An observed inactive-to-active cycle creates one request to reapply the saved display preference after a two-second settling interval. The controller consumes it only after recovery is confirmed, an external is usable, and the old helper has exited. Short lock cycles that leave the panel off consume their request without an extra transaction. Duplicate notifications cannot clear failure inhibition repeatedly. Explicit recovery/manual-on holds retain priority.
+
+Lock/unlock uses the distributed `com.apple.screenIsLocked` and `com.apple.screenIsUnlocked` notifications; workspace display sleep/wake and session switching are observed separately on `NSWorkspace.notificationCenter`. The existing two-second evaluation also reads `CGSessionCopyCurrentDictionary` as a missed-event fallback, using the on-console flag and the runtime `CGSSessionScreenIsLocked` key. No additional polling timer is introduced. The lock notification names/key are undocumented system details; their current operation is checked on the target Mac. See [Apple's screen-wake notification](https://developer.apple.com/documentation/appkit/nsworkspace/screensdidwakenotification) and the notification registrations in [Hammerspoon](https://github.com/Hammerspoon/hammerspoon/blob/master/extensions/caffeinate/libcaffeinate_watcher.m).
+
 `RecoveryAttemptGate` is shared by the controller and helper. A closed lid permits one best-effort enable per process to clear the software disable; each then retains its obligation and observes the lid without further transactions. Opening the lid rearms immediately, including when no system sleep/wake event occurred. With an open lid, retries of an unchanged topology are separated by at least two seconds. A changed snapshot bypasses this cooldown for prompt recovery. The gate uses monotonic uptime and repeated recovery requests do not reset it.
 
 Failed recovery transactions previously entered the same immediate rollback path as a failed disable. Their WindowServer callbacks could trigger further recovery evaluations with no cooldown, creating a transaction/callback loop. Recovery now records the attempt before calling the API; error handling cannot duplicate it. If the lid closes during verification, polling stops and the obligation persists. A failed disable still gets an immediate rollback attempt.
@@ -44,7 +48,7 @@ Unchanged snapshots/notices are not published to SwiftUI. Closed-lid waiting has
 5. Poll the fresh topology for up to 1.8 seconds. Never report an off state from the function return code alone. If an external disappears mid-transaction, request recovery.
 6. On error, inhibit repeat attempts and undo the operation. Keep the rescue helper available if verification of restoration fails.
 
-Recovery uses `forSession` so its enabled setting survives the recovering process's own exit. Neither executable ever commits with `permanently`. Restoration is not delayed by the debounce or an outstanding sleep flag. Once requested, it takes priority even if an external reconnects during recovery. Automatic disabling is inhibited until the next external topology change or an explicit user choice.
+Recovery uses `forSession` so its enabled setting survives the recovering process's own exit. Neither executable ever commits with `permanently`. Restoration is not delayed by the debounce or an outstanding sleep flag. Once requested, it takes priority even if an external reconnects during recovery. Automatic disabling stays inhibited until an external topology change, an explicit user choice, or the single confirmed session-resume opportunity described above.
 
 ## Limitations
 

@@ -2,9 +2,19 @@
 
 ## Automated checks
 
-`bash Scripts/test.sh` now runs 311 checks: 54 policy/lease checks, 19 popover geometry checks, and 238 checks of the production controller, recovery target selection and persistent watchdog recovery engine with injected hardware. The latter cannot issue real display transactions.
+`bash Scripts/test.sh` now runs 349 checks: 54 policy/lease checks, 19 popover geometry checks, and 276 checks of the production controller, recovery target selection and persistent watchdog recovery engine with injected hardware. The latter cannot issue real display transactions.
 
 `bash Scripts/build.sh` compiles both executables, produces the icon and app bundle, verifies the code signature with `codesign --verify --deep --strict`, and lints Info.plist.
+
+## Version 1.1.2: automatic mode after unlock
+
+The user reported that the built-in stayed on after locking with Touch ID, leaving the Mac locked, and unlocking. Read-only diagnostics confirmed an active built-in and the same active external, while the preference remained OFF. The controller used permanent failure inhibition for recovery and did not observe lock/unlock or display sleep/wake; waking therefore could leave the saved automatic mode inhibited indefinitely.
+
+Thirty-eight additional checks exercise the production controller with fake hardware and a monotonic clock. They cover lock without system sleep, screen sleep, system sleep, a wake event before unlock, settling, delayed exit of the old helper, the same external UUID throughout, launch while locked, missed notifications detected by the existing poll, unplug during lock, reconnect after unlock, latest switch preference, failed resume followed by 100 duplicate events, explicit manual recovery holds, and a short lock that never restored the panel. Resume performs at most one automatic attempt per observed inactive/active cycle; a later unrelated helper failure must not inherit a stale resume request.
+
+The previous eight-hour closed-lid regression and recorded headless cable recovery tests pass. The two-second night probe still reports one enable call and two UI publications. Actual lock/unlock validation is recorded separately from these simulated checks.
+
+All 11 native interface checks passed, including hidden-icon reopening through LaunchServices; all four popover checks passed with a 2.5-point gap on the current monitor configuration. The 1.1.2 app was installed with the user's preferences preserved. Code-signature verification, DMG verification and ZIP integrity checks passed.
 
 ## Version 1.1.1: overnight energy use
 
@@ -86,7 +96,8 @@ The integration harness runs a full `NSApplication` event loop. A plain synchron
 - Unplug the last external while built-in is off; the built-in must return.
 - Reconnect with automatic mode enabled; the built-in must turn off after settling.
 - Turn the single preference ON; the built-in must restore and stay on across external reconnections. Turn it OFF again to resume automatic disabling.
-- Sleep and wake with an external attached; recovery must complete first and the screen must remain available until reconnecting the external or choosing the OFF preference again.
+- Lock, wait for display sleep, then unlock with the same external attached; after recovery and settling, the OFF preference must automatically disable the built-in again.
+- Sleep and wake with an external attached; recovery must complete first, then the saved mode must resume once the session and displays are ready.
 - Close/open the lid; the pending restoration must survive and complete once the panel becomes active.
 - Quit while off; the built-in must return and the helper must exit.
 - Remove external during a transition; the built-in must recover.

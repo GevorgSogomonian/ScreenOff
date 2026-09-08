@@ -9,6 +9,7 @@ final class FakeDisplayHardware: DisplayHardwareAccess {
     var state: DisplaySnapshot
     var readFails = false
     var enableFails = false
+    var disableFails = false
     var activationDelayed = false
     var simulateHeadlessRecovery = false
     var recoveryTarget = BuiltInRecoveryTarget()
@@ -36,6 +37,7 @@ final class FakeDisplayHardware: DisplayHardwareAccess {
         }
         guard state.builtIn != nil else { throw DisplayFailure.noBuiltIn }
         if on && enableFails { throw DisplayFailure.verification }
+        if !on && disableFails { throw DisplayFailure.verification }
         if !on || (!state.lidClosed && !activationDelayed) {
             state.displays = state.displays.map {
                 guard $0.builtIn else { return $0 }
@@ -51,6 +53,7 @@ final class FakeDisplayHardware: DisplayHardwareAccess {
 @MainActor
 final class FakeRecoveryGuard: RecoveryGuarding {
     var isRunning = false
+    var canStart = true
     var starts: [Bool] = []
     var restoreRequests = 0
     var stops = 0
@@ -89,13 +92,14 @@ enum RecoveryControllerTests {
     static func make(_ hardware: FakeDisplayHardware = FakeDisplayHardware(),
                      _ suppliedGuard: FakeRecoveryGuard? = nil,
                      recoveryRetryDelay: TimeInterval = 0,
-                     recoveryClock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime })
+                     recoveryClock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+                     sessionProbe: (() -> Bool?)? = nil)
         -> (DisplayController, FakeDisplayHardware, FakeRecoveryGuard) {
         let guardProcess = suppliedGuard ?? FakeRecoveryGuard()
         let controller = DisplayController(testing: true, hardware: hardware,
                                            guardProcess: guardProcess, automaticPreference: true,
                                            verificationDelay: 0, recoveryRetryDelay: recoveryRetryDelay,
-                                           recoveryClock: recoveryClock)
+                                           recoveryClock: recoveryClock, sessionProbe: sessionProbe)
         hardware.afterDisable = { expect(guardProcess.isRunning, "helper ready before disabling") }
         return (controller, hardware, guardProcess)
     }
@@ -295,6 +299,7 @@ enum RecoveryControllerTests {
         testWatchdogRecovery()
         await testRecordedHotplug()
         await testNightRecovery()
+        await testUnlockRecovery()
         print("PASS: \(checks) controller and persistent-recovery checks (simulated hardware only)")
     }
 
@@ -318,6 +323,125 @@ enum RecoveryControllerTests {
         await controller.testEvaluate()
         print("NIGHT PROBE: \(hardware.calls.count) enable calls, \(publications) UI publications in \(ProcessInfo.processInfo.systemUptime - begin) seconds (simulated closed lid / API errors)")
         withExtendedLifetime(observation) {}
+    }
+
+    static func testUnlockRecovery() async {
+        // The original external UUID never changes, so the old policy would
+        // stay inhibited after the helper restored during a lock/sleep cycle.
+        for trigger in ["lock", "display-sleep", "system-sleep"] {
+            var now: TimeInterval = 0
+            let (controller, hardware, helper) = make(recoveryClock: { now })
+            await controller.testEvaluate()
+            controller.testSession(active: false)
+            if trigger == "display-sleep" { controller.testScreens(awake: false) }
+            if trigger == "system-sleep" { controller.testSleep() }
+            hardware.state = fixture() // macOS or the independent helper restored it.
+            await controller.testEvaluate()
+            now = 60
+            controller.testFinishSettling()
+            controller.testScreens(awake: true)
+            controller.testWake()
+            await controller.testEvaluate()
+            expect(hardware.state.builtInIsOn, "wake before unlock cannot disable: \(trigger)")
+            controller.testSession(active: true)
+            await controller.testEvaluate()
+            expect(hardware.state.builtInIsOn, "unlock waits for link settling: \(trigger)")
+            helper.canStart = false
+            now += 3
+            controller.testFinishSettling()
+            await controller.testEvaluate()
+            expect(hardware.state.builtInIsOn && controller.notice == nil,
+                   "retiring helper delays resumption without permanent failure: \(trigger)")
+            helper.canStart = true
+            await controller.testEvaluate()
+            expect(!hardware.state.builtInIsOn && helper.isRunning && helper.starts == [false, false],
+                   "unlock reapplies OFF with a new ready helper on unchanged external: \(trigger)")
+            expect(!controller.usesBuiltInWithExternal, "unlock preserves the saved switch: \(trigger)")
+        }
+        do {
+            var now: TimeInterval = 0
+            var active = false
+            let (controller, hardware, _) = make(recoveryClock: { now }, sessionProbe: { active })
+            await controller.testEvaluate()
+            expect(hardware.calls.isEmpty, "cold launch on lock screen never disables")
+            active = true // Both distributed notifications were missed.
+            await controller.testEvaluate()
+            expect(hardware.calls.isEmpty, "polled unlock also waits for settling")
+            now = 3
+            await controller.testEvaluate()
+            expect(!hardware.state.builtInIsOn, "existing poll detects unlock without extra timers")
+        }
+        for useBoth in [false, true] {
+            var now: TimeInterval = 0
+            let (controller, hardware, _) = make(recoveryClock: { now })
+            await controller.testEvaluate()
+            controller.testSession(active: false)
+            hardware.state = fixture(externals: [])
+            await controller.testEvaluate()
+            if useBoth { controller.setUsesBuiltInWithExternal(true) }
+            controller.testSession(active: true)
+            now = 5
+            controller.testFinishSettling()
+            await controller.testEvaluate()
+            expect(hardware.state.builtInIsOn, "unlock without external keeps the only screen on")
+            hardware.state = fixture()
+            await controller.testEvaluate()
+            expect(hardware.state.builtInIsOn == useBoth,
+                   "external returning after unlock respects the latest preference")
+        }
+        do {
+            var now: TimeInterval = 0
+            let (controller, hardware, _) = make(recoveryClock: { now })
+            await controller.testEvaluate()
+            controller.testSession(active: false)
+            hardware.state = fixture()
+            await controller.testEvaluate()
+            controller.testSession(active: true)
+            now = 3
+            controller.testFinishSettling()
+            hardware.disableFails = true
+            await controller.testEvaluate()
+            for _ in 0..<100 {
+                now += 5
+                controller.testSession(active: true)
+                controller.testScreens(awake: true)
+                controller.testWake()
+                controller.testFinishSettling()
+                await controller.testEvaluate()
+            }
+            expect(hardware.calls.filter { !$0.on }.count == 2 && hardware.state.builtInIsOn,
+                   "failed automatic resume stays inhibited despite duplicate wake/unlock events")
+        }
+        do {
+            var now: TimeInterval = 0
+            let (controller, hardware, _) = make(recoveryClock: { now })
+            await controller.testEvaluate()
+            controller.setBuiltIn(on: true) // Explicit emergency/update hold.
+            await controller.testEvaluate()
+            controller.testSession(active: false)
+            controller.testSession(active: true)
+            now = 10
+            controller.testFinishSettling()
+            await controller.testEvaluate()
+            expect(hardware.state.builtInIsOn && hardware.calls.filter { !$0.on }.count == 1,
+                   "unlock never clears an explicit manual recovery hold")
+        }
+        do {
+            var now: TimeInterval = 0
+            let (controller, hardware, helper) = make(recoveryClock: { now })
+            await controller.testEvaluate()
+            controller.testSession(active: false)
+            controller.testSession(active: true)
+            now = 3
+            await controller.testEvaluate() // Built-in remained off for the entire short lock.
+            helper.isRunning = false
+            await controller.testEvaluate()
+            now = 20
+            controller.testFinishSettling()
+            await controller.testEvaluate()
+            expect(hardware.state.builtInIsOn && hardware.calls.filter { !$0.on }.count == 1,
+                   "completed short lock leaves no stale resume ticket for a later helper fault")
+        }
     }
 
     static func testNightRecovery() async {

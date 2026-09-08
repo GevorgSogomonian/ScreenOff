@@ -22,7 +22,10 @@ final class DisplayController: ObservableObject {
     private var timer: Timer?
     private var evaluation: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
-    private var asleep = false
+    private var activity = SessionResumeState()
+    private let sessionProbe: () -> Bool?
+    private var manualRecoveryHold = false
+    private var asleep: Bool { !activity.systemAwake }
     private var stopping = false
     private var notBefore = Date.distantPast
     private var hasDisabled = false
@@ -37,7 +40,8 @@ final class DisplayController: ObservableObject {
          guardProcess: (any RecoveryGuarding)? = nil,
          automaticPreference: Bool? = nil, verificationDelay: UInt64 = 150_000_000,
          previewOnly: Bool = false, recoveryRetryDelay: TimeInterval = 2,
-         recoveryClock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+         recoveryClock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         sessionProbe: (() -> Bool?)? = nil) {
         self.hardware = hardware
         self.guardProcess = guardProcess ?? RecoveryGuard()
         self.verificationDelay = verificationDelay
@@ -46,6 +50,7 @@ final class DisplayController: ObservableObject {
         self.previewOnly = previewOnly
         self.recoveryAttempts = RecoveryAttemptGate(retryDelay: recoveryRetryDelay)
         self.recoveryClock = recoveryClock
+        self.sessionProbe = sessionProbe ?? (testing ? { nil } : { Self.readSessionActive() })
         let saved = automaticPreference ?? (!testing && preferences.bool(forKey: "automaticDisplayOff"))
         policy = DisplayPolicy(automatic: saved)
         automatic = saved
@@ -96,11 +101,32 @@ final class DisplayController: ObservableObject {
         observers.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.asleep = false
+                self.activity.setSystemAwake(true, now: self.recoveryClock())
                 self.notBefore = Date().addingTimeInterval(4)
                 self.requestEvaluation()
             }
         })
+        for (name, awake) in [(NSWorkspace.screensDidSleepNotification, false),
+                              (NSWorkspace.screensDidWakeNotification, true)] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.screensChanged(awake: awake) }
+            })
+        }
+        for (name, active) in [(NSWorkspace.sessionDidResignActiveNotification, false),
+                               (NSWorkspace.sessionDidBecomeActiveNotification, true)] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.sessionChanged(active: active) }
+            })
+        }
+        // Locking with Touch ID does not necessarily put the Mac to sleep or
+        // switch user sessions. Observe lock notifications as a separate path.
+        let distributed = DistributedNotificationCenter.default()
+        distributed.addObserver(self, selector: #selector(sessionLocked),
+                                name: Notification.Name("com.apple.screenIsLocked"), object: nil,
+                                suspensionBehavior: .deliverImmediately)
+        distributed.addObserver(self, selector: #selector(sessionUnlocked),
+                                name: Notification.Name("com.apple.screenIsUnlocked"), object: nil,
+                                suspensionBehavior: .deliverImmediately)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(emergencyRestore),
                                                             name: Self.recoverNotification, object: nil)
         updateLoginNotice()
@@ -124,12 +150,15 @@ final class DisplayController: ObservableObject {
     func setBuiltIn(on: Bool) {
         guard !busy, !recoveryRequested || on else { return }
         policy.setManual(on: on)
+        manualRecoveryHold = on
+        activity.consume()
         notice = nil
         notBefore = .distantPast
         requestEvaluation()
     }
 
     func setAutomatic(_ enabled: Bool) {
+        manualRecoveryHold = false
         policy.setAutomatic(enabled)
         automatic = enabled
         if !testing { preferences.set(enabled, forKey: "automaticDisplayOff") }
@@ -172,7 +201,19 @@ final class DisplayController: ObservableObject {
             guard let self else { return }
             defer { self.evaluation = nil }
             do {
+                // Reuse the existing poll as a fallback for missed lock events.
+                if let active = self.sessionProbe() {
+                    self.activity.setSessionActive(active, now: self.recoveryClock())
+                }
                 self.updateSnapshot(try self.hardware.snapshot())
+                if self.activity.ready(now: self.recoveryClock()), !self.manualRecoveryHold,
+                   !self.hasDisabled, !self.recoveryRequested,
+                   self.snapshot.builtInIsRestored, self.snapshot.canDisable,
+                   self.guardProcess.canStart, Date() >= self.notBefore {
+                    self.activity.consume()
+                    self.policy.setAutomatic(self.automatic)
+                    self.updateNotice(nil)
+                }
                 let desired = self.policy.wantsBuiltInOn(for: self.snapshot)
                 if !self.hasDisabled && self.snapshot.builtIn != nil &&
                     !self.snapshot.builtInIsOn && !self.snapshot.lidClosed {
@@ -216,8 +257,16 @@ final class DisplayController: ObservableObject {
                     try await self.transition(on: true)
                     return
                 }
-                guard !self.asleep, Date() >= self.notBefore else { return }
+                guard !self.activity.suspended, Date() >= self.notBefore else { return }
+                if self.activity.pending && !self.activity.ready(now: self.recoveryClock()) { return }
+                if self.activity.pending && self.hasDisabled && !self.snapshot.builtInIsOn {
+                    // The display stayed off throughout a short lock cycle.
+                    self.activity.consume()
+                }
                 if !desired && self.snapshot.builtInIsOn {
+                    // A restoring predecessor must finish before a new helper
+                    // can arm; waiting is not a permanent watchdog failure.
+                    guard self.guardProcess.canStart else { return }
                     try await self.transition(on: false)
                 }
             } catch {
@@ -230,6 +279,8 @@ final class DisplayController: ObservableObject {
         busy = true
         defer { busy = false }
         if !on {
+            activity.consume()
+            manualRecoveryHold = false
             try guardProcess.start(restoring: false)
             hasDisabled = true // Even a failed transaction may need rollback.
             protectedExternalIdentities = snapshot.externalIdentities
@@ -246,7 +297,7 @@ final class DisplayController: ObservableObject {
                 showRecoveryNotice()
                 throw DisplayFailure.lidClosed
             }
-            if !on && (stopping || asleep || recoveryRequested || snapshot.lidClosed || snapshot.externalDisplays.isEmpty) {
+            if !on && (stopping || activity.suspended || recoveryRequested || snapshot.lidClosed || snapshot.externalDisplays.isEmpty) {
                 throw DisplayFailure.noExternal
             }
             if on ? snapshot.builtInIsRestored : (snapshot.builtIn != nil && !snapshot.builtInIsOn) {
@@ -304,7 +355,7 @@ final class DisplayController: ObservableObject {
     }
 
     private func prepareForSleep() {
-        asleep = true
+        activity.setSystemAwake(false, now: recoveryClock())
         if hasDisabled {
             recoveryRequested = true
             guardProcess.requestRestore()
@@ -318,12 +369,36 @@ final class DisplayController: ObservableObject {
 
     @objc private func emergencyRestore() {
         policy.stopAfterFailure()
-        asleep = false
+        manualRecoveryHold = true
+        activity.setSystemAwake(true, now: recoveryClock())
+        activity.consume()
         if hasDisabled { recoveryRequested = true }
         notice = nil
         notBefore = .distantPast
         requestEvaluation()
     }
+
+    private static func readSessionActive() -> Bool? {
+        guard let state = CGSessionCopyCurrentDictionary() as? [String: Any] else { return nil }
+        let locked = state["CGSSessionScreenIsLocked"] as? Bool ?? false
+        let onConsole = state[kCGSessionOnConsoleKey as String] as? Bool ?? false
+        return !locked && onConsole
+    }
+
+    private func sessionChanged(active: Bool) {
+        // An early wake/session event must not bypass an actual lock screen.
+        let confirmed = active ? (sessionProbe() ?? true) : false
+        activity.setSessionActive(confirmed, now: recoveryClock())
+        requestEvaluation()
+    }
+
+    private func screensChanged(awake: Bool) {
+        activity.setScreensAwake(awake, now: recoveryClock())
+        requestEvaluation()
+    }
+
+    @objc private func sessionLocked() { sessionChanged(active: false) }
+    @objc private func sessionUnlocked() { sessionChanged(active: true) }
 
     func stop() async -> Bool {
         stopping = true
@@ -379,6 +454,10 @@ extension DisplayController {
         if let evaluation { await evaluation.value }
     }
     func testSleep() { prepareForSleep() }
+    func testSession(active: Bool) { sessionChanged(active: active) }
+    func testScreens(awake: Bool) { screensChanged(awake: awake) }
+    func testWake() { activity.setSystemAwake(true, now: recoveryClock()); requestEvaluation() }
+    func testFinishSettling() { notBefore = .distantPast }
     var testRecoveryPending: Bool { hasDisabled }
     var testRecoveryRequested: Bool { recoveryRequested }
 }
