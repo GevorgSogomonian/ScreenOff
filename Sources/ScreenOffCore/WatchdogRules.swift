@@ -1,6 +1,6 @@
 import Foundation
 
-/// Shared with tests; the helper only ever restores, never disables.
+/// Fail-safe conditions for the independent recovery lease.
 enum WatchdogRules {
     static let heartbeatTimeout: TimeInterval = 8
     static func shouldRecover(parentAlive: Bool, pipeOpen: Bool,

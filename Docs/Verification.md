@@ -18,7 +18,11 @@ The production supervisor tests cover the exact event order with both prompt and
 
 A separate guarded hardware probe tested whether process exit could undo a private application-scoped disable. With an open lid and active external, the panel was disabled, its owner exited, and the panel did **not** return within the observation window. Explicit open-lid recovery succeeded. That rejected mechanism is not used by this release.
 
-The initial 1.3.2 guarded hardware check refused to disable: both physical displays were online but inactive/asleep. No disable was issued by that check. Physical validation is pending an awake, unlocked desktop. The exact lock → close lid → unplug sequence that required a forced reset has not been repeated with this version; earlier open-lid or closed-lid-only checks must not be treated as validation of that sequence.
+The initial 1.3.2 guarded hardware check refused to disable because both physical displays were online but inactive/asleep. After the user unlocked the desktop with the lid open and external connected, the installed app passed the production guarded off/on check: the panel became offline with the external active, then returned online. A separate physical test sent disable through the supervisor, closed its heartbeat pipe and confirmed independent restoration while the parent remained alive. Restore command, EOF and restore-only startup also passed with the built-in already on. All 15 native interface checks passed, and GitHub CI passed on macOS 15.
+
+The 1.3.2 app is installed; both executable hashes match the signed package and the saved automatic preference is preserved. DMG verification and ZIP integrity checks passed. Automatic operation resumed after the ordinary hardware checks; read-only diagnostics confirmed built-in OFF with one active external. The README screenshot is unchanged.
+
+The exact lock → close lid → unplug sequence that required a forced reset has not been repeated with this version; ordinary open-lid tests must not be treated as validation of that physical sequence.
 
 ## Version 1.3.1: avoid overlapping recovery configurations
 
