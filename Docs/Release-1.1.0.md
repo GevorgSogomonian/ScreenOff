@@ -1,21 +1,13 @@
-# ScreenOff 1.1.0
+ScreenOff 1.1.0 replaces the two display controls with one preference and adds an optional hidden menu bar icon.
 
-Вместо двух переключателей теперь один: **«Использовать встроенный дисплей» с внешним монитором**.
+- “Use built-in display” with an external monitor: on uses both displays; off automatically disables the built-in display and restores it when the external disconnects.
+- The menu bar icon can be hidden or shown. Opening ScreenOff through Spotlight displays settings in the existing process, even with the icon hidden.
+- Closing settings leaves the app running in the background. The power button quits and restores the built-in display.
+- Existing preferences migrate automatically: the old automatic-off option being enabled corresponds to the new switch being off.
+- The cable-removal recovery fix from 1.0.3 is preserved.
 
-- Включён — работают оба экрана.
-- Выключен — экран MacBook автоматически отключается при подключении внешнего монитора и включается после извлечения кабеля.
-- Кнопка «Скрыть значок из строки меню» убирает значок, сохраняя фоновую работу.
-- Откройте ScreenOff через Spotlight (⌘Пробел → ScreenOff), чтобы увидеть настройки и при необходимости вернуть значок. Повторное открытие использует уже запущенное приложение.
-- Закрытие окна оставляет ScreenOff работать. Кнопка питания завершает его и восстанавливает встроенный экран.
+Validation: 295 automated policy, geometry and recovery checks; 11 native window and LaunchServices checks; four popover checks; and visual inspection. No new physical display test is claimed for this interface change. The user-confirmed unplug recovery in 1.0.3 remains the hardware evidence.
 
-Настройки сохраняются. Прежнее включённое «Автовыключение» соответствует новому выключенному переключателю. Проверенное восстановление из версии 1.0.3 сохранено.
+To update, quit the old ScreenOff with its power button, open **ScreenOff-1.1.0-arm64.dmg**, replace **ScreenOff.app** in **Applications**, and reopen it.
 
-Проверено: 295 автоматических проверок политики, координат и восстановления; 11 проверок настоящего окна и LaunchServices; четыре проверки расположения popover; визуальная проверка интерфейса. Новые тесты не отключают реальные дисплеи. Физическое извлечение кабеля ранее подтверждено пользователем на версии 1.0.3.
-
-## Установка
-
-Сборка для Apple Silicon, macOS 13+. Завершите старую версию кнопкой питания, откройте DMG и перетащите ScreenOff.app в Applications с заменой.
-
-Подпись ad-hoc, без нотариализации Apple. Если Gatekeeper заблокирует запуск скачанной сборки, используйте «Системные настройки → Конфиденциальность и безопасность → Всё равно открыть» после первой попытки запуска. Отключать Gatekeeper и SIP не нужно.
-
-В релизе: установочный DMG, ZIP приложения, архив исходников и SHA256SUMS.txt.
+Assets include the DMG, app ZIP, source ZIP and SHA256SUMS.txt. Built for Apple Silicon and macOS 13+, ad-hoc signed without Apple notarization. If Gatekeeper blocks launch, attempt to open the app, then use **System Settings → Privacy & Security → Open Anyway**. Do not disable system security.

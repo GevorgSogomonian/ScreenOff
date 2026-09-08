@@ -1,14 +1,14 @@
-ScreenOff 1.0.3 — восстановление встроенного дисплея, который macOS перестаёт перечислять после извлечения кабеля.
+ScreenOff 1.0.3 restores the built-in display when macOS stops enumerating it after cable removal.
 
-Причина предыдущего сбоя установлена при проверке на Mac пользователя: отключённый встроенный дисплей полностью исчезал даже из низкоуровневого списка, а macOS создавала виртуальный экран-заглушку. Повторное чтение списка не позволяло найти экран для включения.
+Testing on the user's Mac identified the previous failure: the disabled built-in display disappeared even from the low-level list, while macOS created a virtual placeholder. Repeated enumeration could not find the panel to enable it.
 
-- Для этого случая приложение и независимая защита сохраняют последний подтверждённый идентификатор встроенного экрана и используют его только для аварийного включения.
-- Виртуальная заглушка macOS больше не считается внешним монитором.
-- Новый обнаруженный идентификатор имеет приоритет; сохранённый никогда не используется для отключения экрана.
-- Два переключателя и исправленное положение меню сохранены.
+- The app and independent recovery helper remember the last positively identified built-in display ID and use it only for emergency enabling.
+- The macOS virtual placeholder is no longer counted as an external monitor.
+- A newly discovered ID takes priority. The cached identifier is never used to disable a display.
+- The two switches and corrected popover position are preserved.
 
-Проверено: 286 автоматических проверок, включая воспроизведение записанного состояния дисплеев. После установки 1.0.3 все временные диагностические процессы были остановлены. Пользователь выключил встроенный экран, оставил автовыключение включённым, извлёк кабель и подтвердил: встроенный экран теперь включается в самом приложении. Подробности: Docs/Verification.md.
+Validation: 286 automated checks, including replay of the recorded display topology. After installing 1.0.3, all temporary diagnostic processes were stopped. The user disabled the built-in display, kept automatic mode enabled, removed the cable, and confirmed that the installed app now restored the built-in display. Details are in Docs/Verification.md.
 
-Установка: завершите старый ScreenOff кнопкой питания, откройте **ScreenOff-1.0.3-arm64.dmg**, замените **ScreenOff.app** в **Applications** и запустите его. Предпочтение автоматического режима сохраняется.
+To update, quit the old ScreenOff with its power button, open **ScreenOff-1.0.3-arm64.dmg**, replace **ScreenOff.app** in **Applications**, and reopen it. The automatic-mode preference is preserved.
 
-В релиз входят DMG, ZIP приложения, ZIP исходников и SHA256SUMS.txt. Сборка для Apple Silicon, macOS 13+, с подписью ad-hoc и без нотариализации Apple. Если Gatekeeper блокирует запуск, после попытки открытия используйте **Системные настройки → Конфиденциальность и безопасность → Всё равно открыть**.
+Assets include the DMG, app ZIP, source ZIP and SHA256SUMS.txt. Built for Apple Silicon and macOS 13+, ad-hoc signed without Apple notarization. If Gatekeeper blocks launch, attempt to open the app, then use **System Settings → Privacy & Security → Open Anyway**.

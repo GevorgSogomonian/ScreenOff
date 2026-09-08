@@ -13,12 +13,13 @@ struct SettingsView: View {
                         .fill(accent.opacity(0.13))
                         .frame(width: 38, height: 38)
                     Image(systemName: "laptopcomputer")
+                        .accessibilityLabel("Laptop")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundStyle(accent)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text("ScreenOff").font(.system(size: 16, weight: .semibold))
-                    Text("Только нужный экран")
+                    Text("Just the screen you need")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -29,22 +30,22 @@ struct SettingsView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Завершить ScreenOff и включить встроенный дисплей")
-                .accessibilityLabel("Завершить ScreenOff")
+                .help("Quit ScreenOff and restore the built-in display")
+                .accessibilityLabel("Quit ScreenOff")
                 .keyboardShortcut("q", modifiers: .command)
             }
             .padding(.bottom, 20)
 
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Использовать встроенный дисплей")
+                    Text("Use built-in display")
                         .font(.system(size: 13, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("С внешним монитором")
+                    Text("With an external monitor")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Toggle("Использовать встроенный дисплей с внешним монитором",
+                Toggle("Use built-in display with an external monitor",
                        isOn: Binding(get: { controller.usesBuiltInWithExternal },
                                      set: { controller.setUsesBuiltInWithExternal($0) }))
                     .labelsHidden()

@@ -1,15 +1,13 @@
-ScreenOff 1.0.1 — исправлено положение меню под значком в строке меню.
+ScreenOff 1.0.1 fixes the settings popover's position below the menu bar icon.
 
-- Верхний край меню остаётся рядом со значком при изменении высоты текста состояния и сообщений автозапуска.
-- После изменения конфигурации мониторов старое меню закрывается; следующий щелчок открывает его с новой привязкой к текущему экрану.
-- Сохранены два переключателя и механизм управления дисплеем.
+The popover stays anchored to the status item when its content height changes. A display-configuration change closes an outdated popover; the next click positions it using the current screen geometry. The two switches and display-control behavior are unchanged.
 
-Проверено: 73 проверки логики и координат; четыре проверки настоящего окна AppKit. Во всех четырёх сценариях зазор под значком составил 2 пункта.
+Validation: 73 automated policy and geometry checks, plus four checks using a real AppKit popover. The gap below the icon was two points in all four scenarios.
 
-Установка: завершите прежний ScreenOff кнопкой питания, откройте **ScreenOff-1.0.1-arm64.dmg**, перетащите **ScreenOff.app** в **Applications** с заменой и запустите приложение снова. Ваше предпочтение автоматического режима сохраняется. Если macOS после замены требует повторного разрешения автозапуска, приложение покажет пояснение.
+To update, quit the old ScreenOff with its power button, open **ScreenOff-1.0.1-arm64.dmg**, replace **ScreenOff.app** in **Applications**, and reopen it. The automatic-mode preference is preserved. If macOS requires renewed login-item approval, the app displays instructions.
 
-В релиз входят DMG, ZIP с приложением, ZIP исходников и SHA256SUMS.txt.
+Assets include the DMG, app ZIP, source ZIP and SHA256SUMS.txt.
 
-Сборка для Apple Silicon, macOS 13+. Подпись ad-hoc, без нотариализации Apple. Если Gatekeeper блокирует запуск, после попытки открытия используйте **Системные настройки → Конфиденциальность и безопасность → Всё равно открыть**. Системную защиту отключать не нужно.
+Built for Apple Silicon and macOS 13+. Ad-hoc signed, without Apple notarization. If Gatekeeper blocks launch, attempt to open the app, then use **System Settings → Privacy & Security → Open Anyway**. Do not disable system security.
 
-Используется закрытый API macOS; обновления ОС могут влиять на отключение дисплея. Тесты и ограничения аппаратной проверки описаны в Docs/Verification.md.
+ScreenOff uses a private macOS API; operating system updates may affect display disabling. Tests and hardware-validation limits are documented in Docs/Verification.md.

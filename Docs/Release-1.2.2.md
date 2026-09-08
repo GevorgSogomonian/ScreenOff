@@ -1,11 +1,11 @@
-# ScreenOff 1.2.2
+ScreenOff 1.2.2
 
-Исправлено окно, которое оставалось на экране при переключении групп Stage Manager.
+Fixes the settings window remaining on screen when switching Stage Manager groups.
 
-При переходе в другое приложение окно ScreenOff теперь автоматически скрывается. Это действует и при обычной смене фокуса без Stage Manager. Управление дисплеем продолжает работать в фоне; для возвращения окна откройте ScreenOff через Spotlight или из «Программ».
+Switching to another application now automatically hides ScreenOff's window. This also applies to ordinary focus changes outside Stage Manager. Display control continues in the background; reopen ScreenOff through Spotlight or Applications to bring settings back.
 
-Значков в строке меню и Dock по-прежнему нет. Сохранённый режим дисплея не меняется. Исправление использует встроенное поведение AppKit и не добавляет фоновых таймеров.
+The app still has no menu bar or Dock icon. The saved display preference is unchanged. This uses native AppKit behavior and adds no background timers.
 
-Пройдены 15 проверок нативного интерфейса, включая передачу фокуса отдельному тестовому приложению, скрытие окна и его повторное открытие в том же процессе.
+All 15 native interface checks passed, including focus handoff to a separate test application, window dismissal and reopening in the same process.
 
-Сборка для Apple Silicon, macOS 13+. Подпись ad-hoc без нотариализации Apple. Для обновления завершите старую версию кнопкой питания в окне приложения и замените ScreenOff.app в Applications файлом из DMG.
+Built for Apple Silicon and macOS 13+, ad-hoc signed without Apple notarization. To update, quit the old version with the power button in settings and replace ScreenOff.app in Applications using the DMG.

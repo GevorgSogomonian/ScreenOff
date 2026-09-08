@@ -55,7 +55,7 @@ final class DisplayController: ObservableObject {
         policy = DisplayPolicy(automatic: saved)
         automatic = saved
         if !hardware.supported {
-            notice = DisplayFailure.unavailable("API отключения дисплея").localizedDescription
+            notice = DisplayFailure.unavailable("the display-disabling API").localizedDescription
         }
         snapshot = (try? hardware.snapshot()) ?? snapshot
     }
@@ -75,14 +75,14 @@ final class DisplayController: ObservableObject {
 
     var statusText: String {
         if let notice { return notice }
-        if busy { return "Переключение дисплея…" }
-        if snapshot.lidClosed { return "Крышка MacBook закрыта" }
-        if snapshot.builtIn == nil { return "Встроенный дисплей не найден" }
+        if busy { return "Switching displays…" }
+        if snapshot.lidClosed { return "MacBook lid is closed" }
+        if snapshot.builtIn == nil { return "Built-in display not found" }
         if snapshot.displays.contains(where: { $0.online && $0.mirrored }) {
-            return "Для отключения экрана выключите видеоповтор в macOS"
+            return "Turn off display mirroring in macOS to disable this screen"
         }
-        if snapshot.externalDisplays.isEmpty { return "Без внешнего монитора экран MacBook включён" }
-        return snapshot.builtInIsOn ? "Встроенный дисплей включён" : "Работает только внешний дисплей"
+        if snapshot.externalDisplays.isEmpty { return "No external monitor; MacBook display is on" }
+        return snapshot.builtInIsOn ? "Built-in display is on" : "Only the external display is active"
     }
 
     func start() {
@@ -178,7 +178,7 @@ final class DisplayController: ObservableObject {
             }
             updateLoginNotice()
         } catch {
-            loginNotice = "Автозапуск: добавьте ScreenOff в Системные настройки → Основные → Объекты входа."
+            loginNotice = "To start at login, add ScreenOff in System Settings → General → Login Items."
         }
         notBefore = .distantPast
         requestEvaluation()
@@ -189,9 +189,9 @@ final class DisplayController: ObservableObject {
         switch SMAppService.mainApp.status {
         case .enabled: loginNotice = nil
         case .requiresApproval:
-            loginNotice = "Разрешите ScreenOff в Системных настройках → Основные → Объекты входа."
+            loginNotice = "Allow ScreenOff in System Settings → General → Login Items."
         default:
-            loginNotice = "Для работы после перезагрузки добавьте ScreenOff в Объекты входа macOS."
+            loginNotice = "To keep working after a restart, add ScreenOff to Login Items in macOS."
         }
     }
 
@@ -330,8 +330,8 @@ final class DisplayController: ObservableObject {
 
     private func showRecoveryNotice() {
         updateNotice(snapshot.lidClosed
-            ? "Восстановление экрана продолжится после открытия крышки."
-            : "Восстанавливаю встроенный экран…")
+            ? "Display recovery will continue when you open the lid."
+            : "Restoring the built-in display…")
     }
 
     private func handleFailure(_ error: Error) async {

@@ -1,6 +1,6 @@
 # Contributing to ScreenOff
 
-Bug reports, suggestions and pull requests are welcome in English or Russian. Ошибки, предложения и pull request можно присылать на русском или английском.
+Bug reports, suggestions and pull requests are welcome. Please use English for reports, discussions, code comments and documentation.
 
 ## Reporting an issue
 

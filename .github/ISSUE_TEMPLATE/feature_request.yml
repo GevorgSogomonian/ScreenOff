@@ -1,18 +1,18 @@
-name: Feature request / Предложить улучшение
-description: Suggest a change to ScreenOff. Можно писать по-русски.
+name: Feature request
+description: Suggest a change to ScreenOff.
 title: "[Feature]: "
 labels: [enhancement]
 body:
   - type: textarea
     id: problem
     attributes:
-      label: Problem or use case / Задача или сценарий
+      label: Problem or use case
       description: What would you like to do, and what gets in the way today?
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed behavior / Предлагаемое поведение
+      label: Proposed behavior
     validations:
       required: true

@@ -1,16 +1,14 @@
-# ScreenOff 1.1.1
+ScreenOff 1.1.1 fixes excessive resource use with the lid closed, including when the Mac remains awake on mains power while the external monitor sleeps.
 
-Исправлено высокое потребление ресурсов при закрытой крышке — в том числе когда Mac остаётся включённым на питании, а внешний монитор спит.
+- Removed a recovery-command loop that could be triggered by callbacks from failed macOS commands.
+- With the lid closed, the app and recovery helper each request restoration once, then wait for the lid to open. Recovery protection remains armed.
+- With the lid open, repeated failed attempts are rate-limited. Lid opening and display-state changes are handled immediately.
+- Removed unchanged state publications, redundant icon updates and window resizing. Waiting for lid opening no longer runs an animation.
 
-- Устранён цикл повторных команд восстановления, который мог запускаться событиями самих неудачных команд macOS.
-- При закрытой крышке приложение и процесс защиты однократно запрашивают включение экрана, затем ждут открытия крышки. Защита сохраняется.
-- При открытой крышке повторные неудачные попытки ограничены интервалом; открытие крышки и изменение состояния дисплеев обрабатываются сразу.
-- Убраны публикации неизменного состояния, лишние изменения значка и перерасчёты окна. Ожидание открытия крышки не запускает анимацию.
+In a reproducible two-second test with a simulated closed lid and macOS errors, the old version issued 20,004 commands and 60,012 UI updates; the new version issued one command and two updates. This measures the software loop, not battery consumption.
 
-В воспроизводимом двухсекундном тесте с имитацией закрытой крышки и ошибок macOS: 20 004 команды / 60 012 обновлений интерфейса в старой версии против 1 команды / 2 обновлений в новой. Это тест программного цикла, а не измерение расхода батареи.
+All 311 automated checks passed, including a simulated eight-hour closed-lid sequence, along with 11 window/Spotlight/LaunchServices checks and four popover-position checks. A full physical overnight test was not performed.
 
-Пройдены 311 автоматических проверок, включая имитацию восьми часов с закрытой крышкой, 11 проверок окна и Spotlight/LaunchServices и четыре проверки положения меню. Полная физическая проверка в течение ночи отдельно не проводилась.
+The update preserves the display preference and icon visibility. Built for Apple Silicon and macOS 13+, ad-hoc signed without Apple notarization.
 
-Обновление сохраняет режим дисплея и скрытие значка. Сборка для Apple Silicon, macOS 13+, с локальной подписью ad-hoc без нотариализации Apple.
-
-Для установки завершите старую версию кнопкой питания и замените приложение в Applications файлом из DMG.
+To install, quit the old version with its power button and replace the app in Applications using the DMG.

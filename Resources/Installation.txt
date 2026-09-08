@@ -1,0 +1,66 @@
+ScreenOff 1.3.0 — your MacBook display, under your control
+
+INSTALLATION
+When updating, first quit the old version using the power button in its window.
+1. Drag ScreenOff.app into Applications and replace the previous app if prompted.
+2. Open ScreenOff from Applications or Spotlight (⌘Space → ScreenOff).
+3. There is one switch: “Use built-in display” with an external monitor.
+   • On: use both displays.
+   • Off: automatically disable the MacBook display with an external monitor.
+   Without an external monitor, the built-in display is restored.
+
+ScreenOff has no menu bar or Dock icon. Open it through Spotlight or
+Applications to access settings. Closing the window leaves the app running
+in the background. Your display preference is saved.
+Switching to another application, including changing Stage Manager groups,
+automatically hides the window. Display control continues in the background.
+Reopen ScreenOff through Spotlight to bring settings back.
+
+Turning the switch off also registers ScreenOff to launch at login.
+macOS may ask you to allow it in System Settings → General → Login Items.
+Turning the switch on restores the display and removes this login registration.
+Settings do not open automatically at login.
+When updating from the original two-switch interface, the former automatic-off
+option being enabled corresponds to “Use built-in display” being off.
+
+If Gatekeeper blocks the app, attempt to launch it, then open
+System Settings → Privacy & Security → Open Anyway.
+The build is ad-hoc signed, without an Apple Developer certificate or notarization.
+Do not disable macOS security or SIP. Running the app needs no administrator password.
+
+HOW IT WORKS
+Disabling removes the built-in display from the active macOS desktop.
+Windows move to the external monitor. Brightness and display colors are unchanged.
+Disconnecting the last external monitor restores the built-in display.
+An open lid keeps the keyboard, trackpad, camera and Touch ID accessible.
+Quitting ScreenOff restores the display. Use the power button in settings to quit.
+Your preference also applies the next time an external monitor connects.
+
+The app uses a private macOS API; operating system updates may affect its behavior.
+If the API is unavailable, ScreenOff prevents disabling and explains why.
+If display mirroring is enabled, turn it off in macOS Display settings first.
+Windows may remain on the external monitor after the built-in display returns.
+
+RECOVERY
+When the external monitor disconnects, the app and an independent recovery process
+attempt to restore the built-in display. Protection also covers an app crash or
+unresponsive main process. No separate persistent services need to be installed.
+Recovery remains armed through temporary display disappearance, sleep and lid
+closure until the built-in display is confirmed active with the lid open.
+With the lid closed, each process requests restoration once and waits for the lid
+to open, without continuous commands or redraws. This also applies when the Mac
+stays awake on mains power while the connected external monitor sleeps.
+If macOS stops enumerating the built-in display after cable removal, ScreenOff
+can enable it using its last confirmed identifier. The macOS virtual placeholder
+is not counted as an external monitor.
+After recovery, automatic disabling resumes on the next monitor connection or
+after unlock/wake. The switch can also reapply your choice. No new disabling
+is attempted until restoration is confirmed.
+If the display does not return, open the lid, reconnect the external monitor
+and run this command in Terminal:
+  /Applications/ScreenOff.app/Contents/MacOS/ScreenOff --recover
+If macOS no longer responds to the API, log out or restart the Mac.
+
+UNINSTALLING
+Turn on “Use built-in display,” quit ScreenOff with the power button and delete
+ScreenOff.app from Applications. No system drivers are installed.
