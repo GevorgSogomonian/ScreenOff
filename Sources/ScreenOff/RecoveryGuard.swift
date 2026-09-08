@@ -64,6 +64,7 @@ final class RecoveryGuard: RecoveryGuarding {
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.beat() }
         }
+        timer.tolerance = 0.2
         heartbeat = timer
         RunLoop.main.add(timer, forMode: .common)
     }

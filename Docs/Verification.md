@@ -2,9 +2,29 @@
 
 ## Automated checks
 
-`bash Scripts/test.sh` now runs 295 checks: 54 policy/lease checks, 19 popover geometry checks, and 222 checks of the production controller, recovery target selection and persistent watchdog recovery engine with injected hardware. The latter cannot issue real display transactions.
+`bash Scripts/test.sh` now runs 311 checks: 54 policy/lease checks, 19 popover geometry checks, and 238 checks of the production controller, recovery target selection and persistent watchdog recovery engine with injected hardware. The latter cannot issue real display transactions.
 
 `bash Scripts/build.sh` compiles both executables, produces the icon and app bundle, verifies the code signature with `codesign --verify --deep --strict`, and lints Info.plist.
+
+## Version 1.1.1: overnight energy use
+
+The user reported a 12-hour energy score of 771.55 after leaving the Mac on mains power, lid closed and external monitor connected but asleep. The Mac was configured to remain awake. Read-only process inspection found 150 minutes 38 seconds of CPU time accumulated by the 1.1.0 main process over about 7.5 hours. A sample taken after the lid was open showed it mostly idle; it cannot reconstruct the overnight call stacks.
+
+A deterministic reproducer uses the production controller with fake display hardware: a closed lid, failed enable calls, and configuration callbacks emitted by those attempts. It has no real display transactions. Over a two-second run, 1.1.0 issued **20,004 enable calls and 60,012 ObservableObject publications** before/after the probe's deliberate 20,000-call feedback cap. Version 1.1.1 issued **one enable call and two publications**. This demonstrates the removed feedback path, not a measured wattage or overnight battery saving.
+
+Sixteen additional controller/helper checks pass. A virtual eight-hour sequence holds the lid closed and external connected but inactive, without system sleep/wake events. Each recovery process attempts once, keeps its obligation, and restores when the lid opens. Unchanged waiting emits no additional UI publications or progress animation. Further cases cover callback storms with an open lid, cooldown expiry, immediate recovery with a newly detected panel, closure during verification, and quit handing off a pending closed-lid recovery. Semantic tests use zero retry delay where time is irrelevant; scheduling regressions use the real two-second interval with an injected monotonic clock.
+
+All eleven native interface checks and four popover positioning checks passed. No new full overnight physical run has been performed; the eight-hour sequence uses a virtual clock. The remembered-display-ID cable recovery regressions continue to pass.
+
+The actual 1.1.1 helper passed restore-command, pipe-EOF and restore-argument integration checks with the built-in already active (no disable requested by those checks). The signed 1.1.1 app was installed and its executable hash matched the packaged app. During a 45.27-second idle observation after launch, with the lid open, the main process used 0.01 CPU seconds and the armed helper used 0.03 CPU seconds: about 0.09% of one CPU in total. This short idle measurement is distinct from the simulated overnight regression. DMG checksum, ZIP integrity and code-signature verification passed.
+
+Reproduce the two-second probe after running the normal tests:
+
+```sh
+.build/recovery-tests --night-probe
+```
+
+The 12-hour value is historical average impact, not watts or current consumption, and is not expected to reset immediately after updating. See [Apple's Activity Monitor guide](https://support.apple.com/en-my/guide/activity-monitor/actmntr43697/mac).
 
 ## Version 1.1.0: one preference and an optional status item
 

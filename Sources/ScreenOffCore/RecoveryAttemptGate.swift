@@ -1,0 +1,32 @@
+import Foundation
+
+/// Recovery remains armed while the lid is closed, but an impossible active
+/// panel confirmation must never drive a transaction/callback feedback loop.
+struct RecoveryAttemptGate {
+    let retryDelay: TimeInterval
+    private var attemptedWithClosedLid = false
+    private var lastState: DisplaySnapshot?
+    private var nextAttempt: TimeInterval = -.infinity
+
+    init(retryDelay: TimeInterval = 2) { self.retryDelay = retryDelay }
+
+    mutating func shouldAttempt(in state: DisplaySnapshot, now: TimeInterval) -> Bool {
+        if state.lidClosed {
+            guard !attemptedWithClosedLid else { return false }
+            // Clear the software disable once; physical activation must wait
+            // for opening the lid. Repeated errors/events cannot rearm this.
+            attemptedWithClosedLid = true
+        } else {
+            if attemptedWithClosedLid || lastState != state { nextAttempt = -.infinity }
+            attemptedWithClosedLid = false
+            guard now >= nextAttempt else { return false }
+        }
+        lastState = state
+        nextAttempt = now + retryDelay
+        return true
+    }
+
+    mutating func waitForOpenLid() { attemptedWithClosedLid = true }
+
+    mutating func reset() { self = Self(retryDelay: retryDelay) }
+}

@@ -65,16 +65,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 self.popover.performClose(nil)
             }
         }
-        observation = controller.$snapshot.sink { [weak self] snapshot in
-            let name = snapshot.builtInIsOn ? "laptopcomputer" : "display"
+        observation = controller.$snapshot.map(\.builtInIsOn).removeDuplicates().sink { [weak self] on in
+            let name = on ? "laptopcomputer" : "display"
             self?.statusItem?.button?.image = NSImage(systemSymbolName: name, accessibilityDescription: "ScreenOff")
             self?.statusItem?.button?.image?.isTemplate = true
         }
         visibilityObservation = interface.$statusItemHidden.sink { [weak self] hidden in
             self?.updateStatusItem(hidden: hidden)
         }
-        contentObservation = controller.objectWillChange.sink { [weak self] in
-            DispatchQueue.main.async { self?.resizeSettingsWindow() }
+        contentObservation = controller.objectWillChange
+            .debounce(for: .milliseconds(20), scheduler: DispatchQueue.main)
+            .sink { [weak self] in
+                guard self?.settingsWindow?.isVisible == true else { return }
+                self?.resizeSettingsWindow()
         }
         if !previewOnly {
             DistributedNotificationCenter.default().addObserver(
@@ -168,6 +171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         host.view.layoutSubtreeIfNeeded()
         let size = host.view.fittingSize
         guard size.width > 0, size.height > 0 else { return }
+        let current = window.contentLayoutRect.size
+        guard abs(current.width - size.width) > 0.5 || abs(current.height - size.height) > 0.5 else { return }
         let top = window.frame.maxY
         window.setContentSize(size)
         window.setFrameOrigin(NSPoint(x: window.frame.minX, y: top - window.frame.height))

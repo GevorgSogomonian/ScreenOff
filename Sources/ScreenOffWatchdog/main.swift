@@ -78,6 +78,7 @@ reader.setEventHandler {
 }
 reader.resume()
 let timer = Timer(timeInterval: 0.75, repeats: true) { _ in checkLease() }
+timer.tolerance = 0.1
 RunLoop.main.add(timer, forMode: .common)
 FileHandle.standardOutput.write(Data("READY\n".utf8))
 app.run()

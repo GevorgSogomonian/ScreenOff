@@ -5,12 +5,16 @@ import Foundation
 struct WatchdogRecovery {
     private(set) var requested = false
     private var consecutiveRestored = 0
+    private var attempts: RecoveryAttemptGate
+
+    init(retryDelay: TimeInterval = 2) { attempts = RecoveryAttemptGate(retryDelay: retryDelay) }
 
     mutating func request() { requested = true }
 
     /// Called on the helper's live AppKit run loop. Never blocks the event loop
     /// waiting for WindowServer and never disables any display.
-    mutating func step(using hardware: any DisplayHardwareAccess) -> Bool {
+    mutating func step(using hardware: any DisplayHardwareAccess,
+                       now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
         guard requested else { return false }
         do {
             let snapshot = try hardware.snapshot()
@@ -19,6 +23,7 @@ struct WatchdogRecovery {
                 return consecutiveRestored >= 2
             }
             consecutiveRestored = 0
+            guard attempts.shouldAttempt(in: snapshot, now: now) else { return false }
             try hardware.setBuiltIn(on: true, recovery: true)
             // Let WindowServer deliver events before checking the result.
             return false

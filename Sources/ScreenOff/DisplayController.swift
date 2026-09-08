@@ -17,6 +17,8 @@ final class DisplayController: ObservableObject {
     private let preferences: UserDefaults
     private let testing: Bool
     private let previewOnly: Bool
+    private var recoveryAttempts: RecoveryAttemptGate
+    private let recoveryClock: () -> TimeInterval
     private var timer: Timer?
     private var evaluation: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
@@ -34,13 +36,16 @@ final class DisplayController: ObservableObject {
          hardware: any DisplayHardwareAccess = DisplayHardware(),
          guardProcess: (any RecoveryGuarding)? = nil,
          automaticPreference: Bool? = nil, verificationDelay: UInt64 = 150_000_000,
-         previewOnly: Bool = false) {
+         previewOnly: Bool = false, recoveryRetryDelay: TimeInterval = 2,
+         recoveryClock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.hardware = hardware
         self.guardProcess = guardProcess ?? RecoveryGuard()
         self.verificationDelay = verificationDelay
         self.preferences = preferences
         self.testing = testing
         self.previewOnly = previewOnly
+        self.recoveryAttempts = RecoveryAttemptGate(retryDelay: recoveryRetryDelay)
+        self.recoveryClock = recoveryClock
         let saved = automaticPreference ?? (!testing && preferences.bool(forKey: "automaticDisplayOff"))
         policy = DisplayPolicy(automatic: saved)
         automatic = saved
@@ -81,6 +86,7 @@ final class DisplayController: ObservableObject {
         let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.requestEvaluation() }
         }
+        timer.tolerance = 0.5
         self.timer = timer
         RunLoop.main.add(timer, forMode: .common)
         let center = NSWorkspace.shared.notificationCenter
@@ -166,7 +172,7 @@ final class DisplayController: ObservableObject {
             guard let self else { return }
             defer { self.evaluation = nil }
             do {
-                self.snapshot = try self.hardware.snapshot()
+                self.updateSnapshot(try self.hardware.snapshot())
                 let desired = self.policy.wantsBuiltInOn(for: self.snapshot)
                 if !self.hasDisabled && self.snapshot.builtIn != nil &&
                     !self.snapshot.builtInIsOn && !self.snapshot.lidClosed {
@@ -192,8 +198,21 @@ final class DisplayController: ObservableObject {
                 if self.recoveryRequested {
                     self.policy.stopAfterFailure()
                     self.guardProcess.requestRestore()
-                    // Never skip this for a closed lid or a temporarily missing
-                    // built-in. Failure keeps the obligation for the next tick.
+                    if self.snapshot.builtInIsRestored {
+                        self.releaseGuard()
+                        return
+                    }
+                    guard self.recoveryAttempts.shouldAttempt(in: self.snapshot, now: self.recoveryClock()) else {
+                        self.showRecoveryNotice()
+                        return
+                    }
+                    if self.snapshot.lidClosed {
+                        // One best-effort clear, then wait without verification
+                        // polling or animation. Keep the helper until lid-open.
+                        try? self.hardware.setBuiltIn(on: true, recovery: true)
+                        self.showRecoveryNotice()
+                        return
+                    }
                     try await self.transition(on: true)
                     return
                 }
@@ -219,8 +238,15 @@ final class DisplayController: ObservableObject {
         try hardware.setBuiltIn(on: on, recovery: on)
         for _ in 0..<12 {
             try await Task.sleep(nanoseconds: verificationDelay)
-            snapshot = try hardware.snapshot()
-            if !on && (stopping || asleep || recoveryRequested || snapshot.externalDisplays.isEmpty) {
+            updateSnapshot(try hardware.snapshot())
+            if on && snapshot.lidClosed {
+                recoveryAttempts.waitForOpenLid()
+                recoveryRequested = true
+                guardProcess.requestRestore()
+                showRecoveryNotice()
+                throw DisplayFailure.lidClosed
+            }
+            if !on && (stopping || asleep || recoveryRequested || snapshot.lidClosed || snapshot.externalDisplays.isEmpty) {
                 throw DisplayFailure.noExternal
             }
             if on ? snapshot.builtInIsRestored : (snapshot.builtIn != nil && !snapshot.builtInIsOn) {
@@ -236,24 +262,45 @@ final class DisplayController: ObservableObject {
         guardProcess.stop()
         hasDisabled = false
         recoveryRequested = false
+        recoveryAttempts.reset()
         protectedExternalIdentities = []
         protectedExternalIDs = []
         notBefore = max(notBefore, Date().addingTimeInterval(2))
-        notice = nil
+        updateNotice(nil)
+    }
+
+    private func updateSnapshot(_ value: DisplaySnapshot) {
+        if snapshot != value { snapshot = value }
+    }
+
+    private func updateNotice(_ value: String?) {
+        if notice != value { notice = value }
+    }
+
+    private func showRecoveryNotice() {
+        updateNotice(snapshot.lidClosed
+            ? "Восстановление экрана продолжится после открытия крышки."
+            : "Восстанавливаю встроенный экран…")
     }
 
     private func handleFailure(_ error: Error) async {
-        notice = error.localizedDescription
         policy.stopAfterFailure()
         // Verification failure must actively undo any partially applied disable.
         // Keep the helper alive if restoration does not complete.
         if hasDisabled {
             recoveryRequested = true
             guardProcess.requestRestore()
-            try? hardware.setBuiltIn(on: true, recovery: true)
-            notice = "Восстанавливаю встроенный экран. Попытки продолжатся, пока macOS не подтвердит включение."
+            if let state = try? hardware.snapshot() { updateSnapshot(state) }
+            // Roll back a failed disable immediately, but never issue a second
+            // enable after a failed recovery in the same evaluation.
+            if recoveryAttempts.shouldAttempt(in: snapshot, now: recoveryClock()) {
+                try? hardware.setBuiltIn(on: true, recovery: true)
+            }
+            showRecoveryNotice()
+        } else {
+            updateNotice(error.localizedDescription)
         }
-        snapshot = (try? hardware.snapshot()) ?? snapshot
+        if let state = try? hardware.snapshot() { updateSnapshot(state) }
     }
 
     private func prepareForSleep() {
@@ -261,7 +308,10 @@ final class DisplayController: ObservableObject {
         if hasDisabled {
             recoveryRequested = true
             guardProcess.requestRestore()
-            try? hardware.setBuiltIn(on: true, recovery: true)
+            if let state = try? hardware.snapshot() { updateSnapshot(state) }
+            if recoveryAttempts.shouldAttempt(in: snapshot, now: recoveryClock()) {
+                try? hardware.setBuiltIn(on: true, recovery: true)
+            }
             // Keep the helper and obligation through sleep/lid closure.
         }
     }

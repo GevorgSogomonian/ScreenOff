@@ -27,6 +27,14 @@ close the old popover, letting the next click acquire the current status-item
 window and display scale. This avoids the vertical gap after status/login text
 shrinks or the built-in screen is disconnected.
 
+## Recovery scheduling and energy
+
+`RecoveryAttemptGate` is shared by the controller and helper. A closed lid permits one best-effort enable per process to clear the software disable; each then retains its obligation and observes the lid without further transactions. Opening the lid rearms immediately, including when no system sleep/wake event occurred. With an open lid, retries of an unchanged topology are separated by at least two seconds. A changed snapshot bypasses this cooldown for prompt recovery. The gate uses monotonic uptime and repeated recovery requests do not reset it.
+
+Failed recovery transactions previously entered the same immediate rollback path as a failed disable. Their WindowServer callbacks could trigger further recovery evaluations with no cooldown, creating a transaction/callback loop. Recovery now records the attempt before calling the API; error handling cannot duplicate it. If the lid closes during verification, polling stops and the obligation persists. A failed disable still gets an immediate rollback attempt.
+
+Unchanged snapshots/notices are not published to SwiftUI. Closed-lid waiting has no progress animation. The status icon changes only when the built-in state changes. Settings sizing is coalesced, skipped for closed windows, and applied only when dimensions actually differ. Timers allow coalescing (0.5 s controller, 0.2 s heartbeat, 0.1 s helper); their existing safety cadence is retained.
+
 ## Display transaction
 
 1. Enumerate all displays again, including offline entries, and prefer the current `CGDisplayIsBuiltin` flag. Remember a positively identified built-in ID in memory. If unplugging removes the panel entirely, `BuiltInRecoveryTarget` permits an enable-only fallback to that ID with an open lid and no usable external. Refuse a cached ID assigned to any other current record. Never use the fallback for disabling.
