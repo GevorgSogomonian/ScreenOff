@@ -11,8 +11,11 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Verify safety policy
         run: bash Scripts/test.sh
       - name: Build and package

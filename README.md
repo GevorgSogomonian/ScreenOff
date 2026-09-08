@@ -2,6 +2,12 @@
 
 Небольшое нативное приложение для MacBook: отключает встроенный дисплей при работе с внешним монитором. Swift + SwiftUI + AppKit, без сторонних зависимостей.
 
+**[Скачать для Mac · Download for Mac](https://github.com/GevorgSogomonian/ScreenOff/releases/latest)** · [Сообщить об ошибке · Issues](https://github.com/GevorgSogomonian/ScreenOff/issues/new/choose) · [Предложить доработку · Contributing](CONTRIBUTING.md)
+
+**Apple Silicon (M1 и новее), macOS 13+.** Готовый DMG находится в разделе Assets последнего релиза. Сборка подписана ad-hoc, без нотариализации Apple; инструкция установки ниже.
+
+*English: ScreenOff automatically disables your MacBook's built-in display when an external monitor is connected and restores it when disconnected. Open its single-switch settings through Spotlight; there is no Dock or menu-bar icon. Download the Apple Silicon DMG from the latest release and drag ScreenOff.app into Applications. If Gatekeeper blocks the downloaded app, use System Settings → Privacy & Security → Open Anyway after attempting to launch it. Reports and contributions are welcome in English or Russian.*
+
 В приложении **один переключатель — «Использовать встроенный дисплей» с внешним монитором**:
 
 - **Включён** — работают оба экрана.
@@ -15,7 +21,7 @@
 
 ## Установка
 
-1. Скачайте `ScreenOff-1.2.2-arm64.dmg` из [Releases](../../releases/latest). При обновлении сначала завершите старый ScreenOff кнопкой питания в окне приложения.
+1. Скачайте `ScreenOff-1.2.2-arm64.dmg` из [Releases](https://github.com/GevorgSogomonian/ScreenOff/releases/latest). При обновлении сначала завершите старый ScreenOff кнопкой питания в окне приложения.
 2. Перетащите **ScreenOff.app → Applications**.
 3. Запустите ScreenOff — откроется окно с одним переключателем. Для повторного открытия используйте Spotlight или «Программы» в Finder.
 
@@ -93,3 +99,7 @@ dist/ScreenOff.app/Contents/MacOS/ScreenOff --hardware-test
 Код ScreenOff реализован самостоятельно. Сигнатуры закрытого API и особенности повторного обнаружения дисплея сверены с [MacDisplay](https://github.com/jjongkwann/MacDisplay/blob/main/core.swift) и описанием [NoLid](https://github.com/NicolasMarino/nolid). Время жизни конфигурации описано в [документации Apple](https://developer.apple.com/documentation/coregraphics/cgconfigureoption), автозапуск — в [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice).
 
 MIT License.
+
+## Участие в разработке
+
+Пишите об ошибках и предложениях в [Issues](https://github.com/GevorgSogomonian/ScreenOff/issues/new/choose). Для доработки создайте fork и отправьте pull request в `main`: владелец проверит изменения и выполнит слияние. Публичный доступ не даёт права напрямую менять код или публиковать релизы. Подробности и команды проверки — в [CONTRIBUTING.md](CONTRIBUTING.md).
