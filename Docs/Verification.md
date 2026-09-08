@@ -22,7 +22,7 @@ The initial 1.3.2 guarded hardware check refused to disable because both physica
 
 The 1.3.2 app is installed; both executable hashes match the signed package and the saved automatic preference is preserved. DMG verification and ZIP integrity checks passed. Automatic operation resumed after the ordinary hardware checks; read-only diagnostics confirmed built-in OFF with one active external. The README screenshot is unchanged.
 
-The exact lock → close lid → unplug sequence that required a forced reset has not been repeated with this version; ordinary open-lid tests must not be treated as validation of that physical sequence.
+**Owner follow-up, September 9, 2026:** after installing ScreenOff 1.3.2, the owner confirmed that the fix worked and the reported wake failure was resolved. The owner also merged PR #5. This is user-reported validation on the affected Mac. The earlier read-only lock observer reached its deadline without recording a lock transition, so no instrumented replay of the complete lock → close lid → unplug sequence is claimed. The automated and separately observed open-lid checks remain documented above.
 
 ## Version 1.3.1: avoid overlapping recovery configurations
 
