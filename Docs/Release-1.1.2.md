@@ -1,15 +1,15 @@
-# ScreenOff 1.1.2
+ScreenOff 1.1.2 reapplies automatic display disabling after unlock or wake.
 
-Исправлено автоматическое отключение встроенного экрана после разблокировки Mac. Раньше восстановление экрана оставляло автоматический режим на паузе до переподключения монитора, хотя переключатель оставался выключенным.
+Previously, recovery during a lock or sleep cycle could leave automatic disabling paused until the external monitor reconnected, even with “Use built-in display” turned off.
 
-- После разблокировки, пробуждения мониторов или Mac приложение снова применяет выбранный режим без переподключения кабеля.
-- Блокировка через Touch ID отслеживается отдельно от сна системы. Существующая периодическая проверка служит резервом при пропущенных уведомлениях.
-- Новое отключение выполняется после короткого ожидания готовности дисплеев, подтверждённого восстановления и завершения предыдущего защитного процесса.
-- Единственный экран не отключается; включённый переключатель сохраняет работу обоих экранов.
-- Дублирующиеся уведомления разблокировки не запускают повторные попытки после ошибки. Исправления восстановления при извлечении кабеля и ночного энергопотребления сохранены.
+- Observe Touch ID locking separately from system sleep, with a fallback through the existing poll and no additional timer.
+- Reapply the saved preference after unlock, display wake or system wake, even if the cable has not changed. Wait for displays to settle and the previous recovery helper to finish.
+- Never disable the only usable display. Selecting both displays keeps both enabled.
+- Duplicate wake events do not repeatedly retry a failed attempt.
+- Preserve the cable-removal recovery and overnight resource-use fixes.
 
-Пройдены 349 автоматических проверок, включая блокировку без сна Mac, сон мониторов, сон системы, пропущенные уведомления, возвращение внешнего монитора, неудачную попытку отключения, краткую блокировку и явный режим восстановления.
+Validation: 349 automated checks. The installed app also passed the physical Touch ID lock → external-monitor sleep → unlock scenario: the built-in display automatically disabled about two to three seconds after unlock. The user and a separate read-only observer confirmed the result. See Docs/Verification.md.
 
-Проверено на Mac пользователя: блокировка кнопкой Touch ID → сон внешнего монитора → разблокировка. Встроенный экран автоматически отключился примерно через 2–3 секунды; результат подтверждён пользователем и независимым наблюдением состояния дисплеев.
+To update, quit the old version with its power button and replace **ScreenOff.app** in **Applications** using **ScreenOff-1.1.2-arm64.dmg**. Preferences are preserved.
 
-Сборка для Apple Silicon, macOS 13+. Подпись ad-hoc без нотариализации Apple. Завершите старую версию кнопкой питания и замените приложение в Applications файлом из DMG.
+Built for Apple Silicon and macOS 13+, ad-hoc signed without Apple notarization. If Gatekeeper blocks launch, attempt to open the app, then use **System Settings → Privacy & Security → Open Anyway**.

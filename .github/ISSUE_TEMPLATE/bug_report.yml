@@ -1,42 +1,42 @@
-name: Bug report / Сообщить об ошибке
-description: Tell us what went wrong with ScreenOff. Можно писать по-русски.
+name: Bug report
+description: Tell us what went wrong with ScreenOff.
 title: "[Bug]: "
 labels: [bug]
 body:
   - type: input
     id: app-version
     attributes:
-      label: ScreenOff version / Версия ScreenOff
-      placeholder: "1.2.2"
+      label: ScreenOff version
+      placeholder: "1.3.0"
     validations:
       required: true
   - type: input
     id: mac
     attributes:
-      label: Mac and macOS / Модель Mac и версия macOS
+      label: Mac and macOS
       placeholder: MacBook Pro M1, macOS 15.7
     validations:
       required: true
   - type: input
     id: external-display
     attributes:
-      label: External display and connection / Внешний монитор и подключение
+      label: External display and connection
       description: Include the monitor, cable or dock, and whether the lid was open or closed.
   - type: textarea
     id: steps
     attributes:
-      label: Steps to reproduce / Как повторить
+      label: Steps to reproduce
       description: Include the switch setting and any unplug, lock, sleep or wake steps.
     validations:
       required: true
   - type: textarea
     id: result
     attributes:
-      label: Expected and actual result / Ожидаемый и фактический результат
+      label: Expected and actual result
     validations:
       required: true
   - type: textarea
     id: details
     attributes:
-      label: Extra details / Дополнительно
+      label: Extra details
       description: Screenshots or relevant logs are welcome. Remove personal information and serial numbers before posting.

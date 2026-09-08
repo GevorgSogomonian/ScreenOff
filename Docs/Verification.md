@@ -2,9 +2,19 @@
 
 ## Automated checks
 
-`bash Scripts/test.sh` now runs 349 checks: 54 policy/lease checks, 19 popover geometry checks, and 276 checks of the production controller, recovery target selection and persistent watchdog recovery engine with injected hardware. The latter cannot issue real display transactions.
+`bash Scripts/test.sh` now runs 330 checks: 54 policy/lease checks and 276 checks of the production controller, recovery target selection and persistent watchdog recovery engine with injected hardware. These cannot issue real display transactions. The former popover geometry checks were removed with the menu bar interface in 1.2.0.
 
 `bash Scripts/build.sh` compiles both executables, produces the icon and app bundle, verifies the code signature with `codesign --verify --deep --strict`, and lints Info.plist.
+
+## Version 1.3.0: English interface and documentation
+
+All 330 policy/controller/recovery checks and all 15 native interface checks pass after translating application text. Display-control behavior, recovery, login preferences and window lifecycle are unchanged. The interface harness uses isolated preview applications and performs no physical display transactions. No new physical cable-removal or lock/unlock test is claimed for this translation update.
+
+The app declares English as its development region and only supported localization. Settings, status and error messages, login instructions, tooltips and accessibility labels are in English. The installation guide, current documentation, historical release-note documents and contribution templates were translated. Packaging creates fresh app and DMG staging directories so obsolete resources cannot survive a rebuild.
+
+The current project audit found no Cyrillic characters in 52 text files or their filenames. The native settings screenshot was regenerated and visually inspected. The installed app's accessibility tree exposed English labels for the laptop image, single display switch, status, quit button and help, along with English native window controls.
+
+The signed 1.3.0 app replaced the entire installed bundle after the old app and recovery helper exited normally. Both installed executable hashes match the packaged app; the saved automatic preference remained enabled (the positive UI switch remained off). Code-signature verification, DMG checksum and ZIP integrity checks passed. Bundle resources and ZIP contents contain the English installation guide with no obsolete language resource; DMG staging contains “Read Before Installing.txt.” Historical Git commits and older release archives are preserved; English app downloads start with 1.3.0.
 
 ## Version 1.2.2: dismiss settings when switching applications
 

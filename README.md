@@ -1,105 +1,103 @@
 # ScreenOff
 
-Небольшое нативное приложение для MacBook: отключает встроенный дисплей при работе с внешним монитором. Swift + SwiftUI + AppKit, без сторонних зависимостей.
+A small native MacBook app that disables the built-in display while you use an external monitor. Built with Swift, SwiftUI and AppKit, with no third-party dependencies.
 
-**[Скачать для Mac · Download for Mac](https://github.com/GevorgSogomonian/ScreenOff/releases/latest)** · [Сообщить об ошибке · Issues](https://github.com/GevorgSogomonian/ScreenOff/issues/new/choose) · [Предложить доработку · Contributing](CONTRIBUTING.md)
+**[Download for Mac](https://github.com/GevorgSogomonian/ScreenOff/releases/latest)** · [Report an issue](https://github.com/GevorgSogomonian/ScreenOff/issues/new/choose) · [Contribute](CONTRIBUTING.md)
 
-**Apple Silicon (M1 и новее), macOS 13+.** Готовый DMG находится в разделе Assets последнего релиза. Сборка подписана ad-hoc, без нотариализации Apple; инструкция установки ниже.
+**Apple Silicon (M1 or later), macOS 13+.** Download the DMG from the latest release's Assets section. The app is ad-hoc signed and is not notarized by Apple; installation instructions are below.
 
-*English: ScreenOff automatically disables your MacBook's built-in display when an external monitor is connected and restores it when disconnected. Open its single-switch settings through Spotlight; there is no Dock or menu-bar icon. Download the Apple Silicon DMG from the latest release and drag ScreenOff.app into Applications. If Gatekeeper blocks the downloaded app, use System Settings → Privacy & Security → Open Anyway after attempting to launch it. Reports and contributions are welcome in English or Russian.*
+There is **one switch: “Use built-in display” with an external monitor**.
 
-В приложении **один переключатель — «Использовать встроенный дисплей» с внешним монитором**:
+- **On:** use both displays.
+- **Off:** automatically disable the MacBook display when an external monitor is connected, and restore it when the cable is disconnected.
 
-- **Включён** — работают оба экрана.
-- **Выключен** — при подключении внешнего монитора экран MacBook отключается. При извлечении кабеля он включается обратно.
+ScreenOff runs **without a menu bar or Dock icon**. Press **⌘Space**, type **ScreenOff** and press Return to open settings. Closing the window leaves the app running in the background. Your display preference is saved.
 
-Приложение работает **без значков в строке меню и Dock**. Чтобы открыть окно, нажмите **⌘Пробел**, введите **ScreenOff** и нажмите Enter. Закрытие окна оставляет приложение работающим в фоне. Выбранный режим сохраняется.
+The power button in the window quits ScreenOff and restores the built-in display.
 
-Кнопка питания в заголовке завершает приложение и восстанавливает встроенный экран.
+![ScreenOff settings](Docs/Window.png)
 
-![Окно ScreenOff](Docs/Window.png)
+## Installation
 
-## Установка
+1. Download `ScreenOff-1.3.0-arm64.dmg` from [Releases](https://github.com/GevorgSogomonian/ScreenOff/releases/latest). When updating, first quit the old ScreenOff using the power button in its window.
+2. Drag **ScreenOff.app → Applications** and replace the previous app if prompted.
+3. Open ScreenOff to see its single-switch settings. Use Spotlight or Applications in Finder to reopen the window later.
 
-1. Скачайте `ScreenOff-1.2.2-arm64.dmg` из [Releases](https://github.com/GevorgSogomonian/ScreenOff/releases/latest). При обновлении сначала завершите старый ScreenOff кнопкой питания в окне приложения.
-2. Перетащите **ScreenOff.app → Applications**.
-3. Запустите ScreenOff — откроется окно с одним переключателем. Для повторного открытия используйте Spotlight или «Программы» в Finder.
+The release targets **Apple Silicon, macOS 13+**. No system drivers, administrator privileges, Accessibility permission or Screen Recording permission are needed to run it.
 
-Сборка для **Apple Silicon, macOS 13+**. Системные драйверы, права администратора, Accessibility и Screen Recording не нужны.
+The app is **ad-hoc signed**, without an Apple Developer certificate or notarization. If Gatekeeper blocks the downloaded app, first attempt to open it, then use **System Settings → Privacy & Security → Open Anyway**. Do not disable Gatekeeper or SIP.
 
-Приложение подписано **ad-hoc**, без платного сертификата Apple Developer и нотариализации. Если скачанную сборку заблокирует Gatekeeper, после попытки запуска откройте **Системные настройки → Конфиденциальность и безопасность → Всё равно открыть**. Не отключайте Gatekeeper или SIP.
+## Behavior
 
-## Поведение
+- Switching to another application automatically hides the ScreenOff window, including when changing Stage Manager groups. This also applies outside Stage Manager. Display control continues in the background; reopening ScreenOff through Spotlight brings settings back. This is automatic window dismissal, rather than ordinary Stage Manager group membership.
+- The display is disabled in WindowServer's display configuration and removed from the active desktop. Brightness and gamma are unchanged; ScreenOff does not cover the panel with a black window.
+- ScreenOff does not disable the last usable display. Disconnecting the last active external monitor restores the built-in display.
+- The switch saves your preference for external-monitor use. You can set it before connecting a monitor. Turning it on restores the built-in display immediately; turning it off disables the display when a suitable external monitor is connected.
+- Before sleep and when the lid closes, ScreenOff requests restoration. If the display is temporarily unavailable, recovery continues after wake and lid opening. Further disabling is blocked until restoration is confirmed.
+- After unlock or wake, ScreenOff reapplies the saved preference even if the external monitor has not been reconnected. It waits for the displays to settle and the previous recovery helper to exit, which usually takes a few seconds. It does not start a new disable operation while the session is locked or inactive. Selecting both displays keeps both enabled.
+- Turning the switch off enables automatic disabling and registers launch at login through `SMAppService.mainApp`. ScreenOff shows instructions if macOS requires approval. Turning the switch on unregisters this login item. Settings do not open automatically at login.
+- Preferences from version 1.0.3 are preserved: the former automatic-off option being enabled corresponds to the current switch being off.
+- Window positions are not restored when the built-in display returns.
+- When display mirroring is enabled, ScreenOff asks you to turn it off in macOS settings before disabling the panel, preserving your mirroring configuration.
 
-- При переходе в другое приложение окно ScreenOff автоматически скрывается, в том числе при переключении групп Stage Manager. Это действует и без Stage Manager. Управление дисплеем продолжается в фоне; повторное открытие через Spotlight возвращает окно. Значки в строке меню и Dock не создаются.
-- Экран отключается на уровне конфигурации дисплеев WindowServer и исчезает из активного рабочего стола. Яркость и гамма не изменяются; чёрное окно поверх экрана не используется.
-- Последний рабочий дисплей приложение не отключает. При отсоединении последнего активного внешнего монитора встроенный экран восстанавливается.
-- Переключатель задаёт постоянное предпочтение для работы с внешним монитором. Его можно изменить заранее, когда к MacBook ничего не подключено. При включении экран возвращается сразу; при выключении он отключается, если подключён подходящий внешний монитор.
-- Перед сном и при закрытии крышки ScreenOff запрашивает восстановление. Если экран временно недоступен, попытки продолжаются после пробуждения и открытия крышки. До подтверждённого включения повторное отключение заблокировано.
-- После разблокировки или пробуждения ScreenOff снова применяет сохранённый режим, даже если внешний монитор не переподключали. Приложение ждёт готовности дисплеев и завершения предыдущего процесса защиты; обычно это занимает несколько секунд. При заблокированной или неактивной сессии новое отключение не выполняется. Настройка работы обоих экранов сохраняет их включёнными.
-- Выключенный переключатель включает автоматическое отключение и регистрирует запуск при входе через `SMAppService.mainApp`. Если macOS требует согласия, приложение показывает пояснение. Включённый переключатель отменяет этот автозапуск. При входе в систему окно настроек не открывается.
-- Настройка из версии 1.0.3 сохраняется: прежнее включённое «Автовыключение» соответствует новому выключенному переключателю.
-- Позиции окон после повторного включения встроенного дисплея не восстанавливаются.
-- При включённом видеоповторе приложение просит сначала отключить повтор в настройках macOS, чтобы не менять вашу схему зеркалирования.
+## Compatibility and recovery
 
-## Совместимость и восстановление
+Apple does not provide a public API for fully disabling an individual display. ScreenOff dynamically loads `SLSConfigureDisplayEnabled` / `CGSConfigureDisplayEnabled` and verifies the actual display state after changes. A macOS update can change this private API. If the required symbols are unavailable, ScreenOff opens but prevents disabling and explains why.
 
-Apple не предоставляет публичный API полного отключения отдельного дисплея. ScreenOff динамически загружает `SLSConfigureDisplayEnabled` / `CGSConfigureDisplayEnabled` и проверяет фактическое состояние после переключения. Обновление macOS может изменить закрытый API. При отсутствии нужных символов приложение запускается, но блокирует отключение с пояснением.
+Disabling uses an application-scoped configuration (`forAppOnly`); enabling uses the current session (`forSession`). Neither permanently changes the configuration. Before disabling, ScreenOff starts an independent `ScreenOffWatchdog`, which records connected external displays and monitors the main process. Cable removal, lid closure, a crash, a lost connection or a heartbeat gap longer than eight seconds triggers restoration. Recovery remains armed without a timeout, including when macOS temporarily stops enumerating the built-in display. With the lid closed, each process requests restoration once, then waits for the lid to open without repeated commands or animation. With the lid open, retries for unchanged display state are limited to one every two seconds; topology changes allow immediate recovery. Protection ends only after the built-in display is confirmed active with the lid open.
 
-Отключение применяется на время работы приложения (`forAppOnly`), включение — на текущую сессию (`forSession`), без постоянного изменения конфигурации. Перед отключением запускается независимый `ScreenOffWatchdog`: он запоминает подключённые внешние экраны и проверяет связь с основным процессом. Извлечение кабеля, закрытие крышки, авария, потеря связи или зависание дольше 8 секунд запускают восстановление. Защита сохраняется без тайм-аута, в том числе при временном исчезновении встроенного дисплея из списка macOS. При закрытой крышке каждый процесс однократно запрашивает включение, затем ждёт её открытия без повторных команд и анимации. При открытой крышке повторы для неизменного состояния ограничены интервалом в две секунды; изменение состояния дисплеев позволяет восстановить экран сразу. Защита завершается только после подтверждения активного встроенного экрана при открытой крышке.
+Since version 1.0.3, ScreenOff handles macOS removing the built-in display from enumeration and creating a virtual placeholder. It excludes that placeholder from external monitors and can recover using the last positively identified built-in display ID. This fallback is allowed only for enabling, with the lid open and no usable external display; a newly discovered ID always takes priority. These are recovery mechanisms, not a guarantee against macOS failures.
 
-Начиная с версии 1.0.3 приложение учитывает случай, когда macOS полностью убирает встроенный дисплей из списка и создаёт виртуальный экран-заглушку. Приложение исключает такую заглушку из внешних мониторов и для восстановления использует последний подтверждённый ID встроенного экрана. Этот запасной путь разрешён только для включения, при открытой крышке и отсутствии рабочего внешнего дисплея; новый обнаруженный ID всегда имеет приоритет. Это дополнительные механизмы восстановления, а не гарантия от сбоев самой macOS.
-
-Для ручного восстановления, в том числе когда приложение не запущено:
+To request manual recovery, even when the app is not running:
 
 ```sh
 /Applications/ScreenOff.app/Contents/MacOS/ScreenOff --recover
 ```
 
-Если API macOS не отвечает, закройте и откройте крышку либо переподключите монитор. Затем, если требуется, выйдите из учётной записи или перезагрузите Mac.
+If the macOS API does not respond, close and open the lid or reconnect the monitor. If necessary, log out or restart the Mac.
 
-## Сборка и проверки
+## Building and testing
 
-Нужны Xcode Command Line Tools, полный Xcode не требуется.
+Install Xcode Command Line Tools; the full Xcode application is not required.
 
 ```sh
-bash Scripts/test.sh       # политика, контроллер и восстановление на подставном дисплее
+bash Scripts/test.sh       # Simulated policy, controller and recovery checks
 bash Scripts/build.sh      # dist/ScreenOff.app
-bash Scripts/package.sh    # .app, .dmg, .zip и SHA256SUMS.txt
+bash Scripts/package.sh    # App, DMG, ZIP and SHA256SUMS.txt
 ```
 
-Диагностика без изменения экранов:
+Read-only display diagnostics:
 
 ```sh
 dist/ScreenOff.app/Contents/MacOS/ScreenOff --diagnose
 ```
 
-Явный аппаратный тест при открытой крышке и подключённом внешнем мониторе (экран отключается примерно на две секунды и включается обратно):
+An explicit hardware test with the lid open and an external monitor connected disables the built-in display for about two seconds, then restores it:
 
 ```sh
 dist/ScreenOff.app/Contents/MacOS/ScreenOff --hardware-test
 ```
 
-Выполняйте его, предварительно завершив обычный экземпляр ScreenOff. Для подписания сертификатом Developer ID передайте `SIGNING_IDENTITY`. Нотариализация требует собственной учётной записи Apple Developer и выполняется отдельно. `ARCH=x86_64` позволяет собрать Intel-версию, однако работа отключения на Intel не проверена и не заявляется.
+Quit the ordinary ScreenOff instance before running hardware tests. Set `SIGNING_IDENTITY` to sign with a Developer ID certificate. Notarization requires your own Apple Developer account and is a separate step. `ARCH=x86_64` can build an Intel version, but Intel display disabling has not been validated and is not claimed as supported.
 
-`bash Scripts/test-watchdog.sh` — отдельный аппаратный тест helper: отключает экран, закрывает канал heartbeat и проверяет восстановление, пока родительский процесс продолжает работать. Он также требует подключённого внешнего монитора и завершённого обычного экземпляра ScreenOff.
+`bash Scripts/test-watchdog.sh` is a separate hardware test: it disables the display, closes the heartbeat channel and checks independent restoration while the parent remains alive. It also requires an external monitor and the ordinary ScreenOff instance to be closed.
 
-`bash Scripts/test-interface.sh` проверяет фоновый запуск, отсутствие значков в Dock и строке меню, размеры и закрытие окна, повторное открытие через LaunchServices (путь Spotlight/Finder) в том же процессе. Тест работает в отдельном preview-приложении и не управляет дисплеями.
+`bash Scripts/test-interface.sh` checks background startup, absence of Dock and menu bar icons, window sizing and closing, focus-loss dismissal, and reopening the same process through LaunchServices (the Spotlight/Finder path). It uses isolated preview applications and does not control physical displays.
 
-`bash Scripts/test-restore-only.sh` проверяет настоящий helper через команду восстановления, закрытие канала и запуск в режиме восстановления. Встроенный дисплей должен быть включён заранее; тест не отправляет команд отключения.
+`bash Scripts/test-restore-only.sh` checks the real helper through a restore command, channel closure and restore-mode startup. The built-in display must already be enabled; this test sends no disable commands.
 
-Подробности: [архитектура](Docs/Architecture.md), [результаты проверок](Docs/Verification.md).
+See [Architecture](Docs/Architecture.md) and [Verification](Docs/Verification.md) for details.
 
-## Удаление
+## Uninstalling
 
-Включите «Использовать встроенный дисплей», завершите приложение кнопкой питания и удалите ScreenOff.app. Если приложение уже удалено, его запись можно убрать из **Объектов входа** macOS. Отдельных постоянных служб нет. Режим дисплея сохраняется в домене `com.gevorg.screenoff`.
+Turn on “Use built-in display,” quit with the power button and delete ScreenOff.app. If you already deleted the app, remove its entry from macOS **Login Items**. No separate persistent services are installed. The display preference is stored in the `com.gevorg.screenoff` defaults domain.
 
-## Источники технических сведений
+## Technical references
 
-Код ScreenOff реализован самостоятельно. Сигнатуры закрытого API и особенности повторного обнаружения дисплея сверены с [MacDisplay](https://github.com/jjongkwann/MacDisplay/blob/main/core.swift) и описанием [NoLid](https://github.com/NicolasMarino/nolid). Время жизни конфигурации описано в [документации Apple](https://developer.apple.com/documentation/coregraphics/cgconfigureoption), автозапуск — в [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice).
+ScreenOff is an independent implementation. Private API signatures and display rediscovery behavior were checked against [MacDisplay](https://github.com/jjongkwann/MacDisplay/blob/main/core.swift) and the [NoLid description](https://github.com/NicolasMarino/nolid). Configuration lifetime is documented in [Apple's CGConfigureOption reference](https://developer.apple.com/documentation/coregraphics/cgconfigureoption), and login registration in [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice).
 
 MIT License.
 
-## Участие в разработке
+## Contributing
 
-Пишите об ошибках и предложениях в [Issues](https://github.com/GevorgSogomonian/ScreenOff/issues/new/choose). Для доработки создайте fork и отправьте pull request в `main`: владелец проверит изменения и выполнит слияние. Публичный доступ не даёт права напрямую менять код или публиковать релизы. Подробности и команды проверки — в [CONTRIBUTING.md](CONTRIBUTING.md).
+Report bugs and suggestions in [Issues](https://github.com/GevorgSogomonian/ScreenOff/issues/new/choose). Use English for reports, discussions, code comments and documentation. To contribute code, fork the repository and open a pull request against `main`; the owner reviews and merges changes. Public access does not grant permission to modify the repository directly or publish releases. See [CONTRIBUTING.md](CONTRIBUTING.md) for details and validation commands.

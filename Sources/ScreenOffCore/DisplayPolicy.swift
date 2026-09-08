@@ -82,15 +82,15 @@ enum DisplayFailure: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable(let symbol):
-            return "Эта версия macOS не предоставляет \(symbol). Отключение экрана недоступно."
+            return "This version of macOS does not provide \(symbol). Display disabling is unavailable."
         case .system(let operation, let code):
-            return "macOS не выполнила действие «\(operation)» (код \(code))."
-        case .noBuiltIn: return "Встроенный дисплей сейчас недоступен. Откройте крышку MacBook."
-        case .noExternal: return "Сначала подключите и включите внешний монитор."
-        case .lidClosed: return "Откройте крышку MacBook, чтобы управлять встроенным дисплеем."
-        case .mirroring: return "Выключите видеоповтор в настройках дисплеев macOS, затем повторите."
-        case .verification: return "macOS не подтвердила переключение дисплея. Автовыключение приостановлено до переподключения монитора."
-        case .watchdog: return "Защита восстановления экрана недоступна. Встроенный дисплей оставлен включённым."
+            return "macOS could not complete \(operation) (code \(code))."
+        case .noBuiltIn: return "The built-in display is unavailable. Open your MacBook lid."
+        case .noExternal: return "Connect and turn on an external monitor first."
+        case .lidClosed: return "Open your MacBook lid to control the built-in display."
+        case .mirroring: return "Turn off mirroring in macOS Display settings, then try again."
+        case .verification: return "macOS did not confirm the display change. Automatic disabling is paused until the monitor reconnects."
+        case .watchdog: return "Display recovery protection is unavailable. The built-in display has been left on."
         }
     }
 }

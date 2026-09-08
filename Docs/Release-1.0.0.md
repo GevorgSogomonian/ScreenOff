@@ -1,11 +1,11 @@
-ScreenOff для MacBook с Apple Silicon. Два переключателя в строке меню: встроенный дисплей и автоматическое отключение при подключении внешнего монитора.
+ScreenOff for Apple Silicon MacBooks. Two menu bar switches control the built-in display and automatic disabling when an external monitor connects.
 
-Установка: откройте **ScreenOff-1.0.0-arm64.dmg** и перетащите **ScreenOff.app** в **Applications**. Альтернатива — ZIP с тем же приложением.
+Installation: open **ScreenOff-1.0.0-arm64.dmg** and drag **ScreenOff.app** into **Applications**. A ZIP containing the same app is also available.
 
-Автоматический режим включает запуск при входе в macOS. Ручное включение имеет приоритет до следующего изменения набора внешних мониторов. При отключении внешнего монитора или выходе из приложения встроенный экран восстанавливается. Отдельный helper контролирует связь с приложением и умеет самостоятельно восстанавливать экран.
+Automatic mode registers launch at login. A manual enable takes priority until the set of external monitors changes. Disconnecting the external monitor or quitting the app restores the built-in display. An independent helper monitors its connection to the main app and can restore the display on its own.
 
-Проверено на MacBook Pro M1, macOS 27.0 beta (26A5425a): фактическое отключение/включение панели и независимое восстановление при потере связи. 54 автоматические проверки политики и условий восстановления проходят. Физические сценарии сна, отсоединения кабеля и повторного входа в macOS перечислены для ручной проверки в Docs/Verification.md.
+Tested on a MacBook Pro M1 with macOS 27.0 beta (26A5425a): actual panel disabling/enabling and independent recovery after loss of communication. All 54 automated policy and recovery checks passed. Physical sleep, cable-removal and subsequent-login scenarios are listed for manual validation in Docs/Verification.md.
 
-Сборка подписана ad-hoc и не нотариализована Apple. Если Gatekeeper блокирует запуск, используйте **Системные настройки → Конфиденциальность и безопасность → Всё равно открыть** после попытки запуска. Отключать системную защиту не требуется.
+The app is ad-hoc signed and is not notarized by Apple. If Gatekeeper blocks it, attempt to launch it, then use **System Settings → Privacy & Security → Open Anyway**. Do not disable system security.
 
-Приложение использует закрытый API macOS; обновления ОС могут повлиять на его работу. Требуется macOS 13+, Apple Silicon, открытая крышка и активный внешний монитор. Для отключения экрана видеоповтор должен быть выключен.
+ScreenOff uses a private macOS API, which operating system updates may change. Requires Apple Silicon, macOS 13+, an open lid and an active external monitor. Turn off display mirroring before disabling the panel.

@@ -52,12 +52,12 @@ final class DisplayHardware: DisplayHardwareAccess {
             let error: CGError
             if let list { error = list(capacity, &buffer, &count) }
             else { error = CGGetOnlineDisplayList(capacity, &buffer, &count) }
-            guard error == .success else { throw DisplayFailure.system("список дисплеев", error.rawValue) }
+            guard error == .success else { throw DisplayFailure.system("display enumeration", error.rawValue) }
             if count < capacity {
                 ids = Array(buffer.prefix(Int(count)))
                 break
             }
-            guard capacity < 4096 else { throw DisplayFailure.system("слишком много дисплеев", -1) }
+            guard capacity < 4096 else { throw DisplayFailure.system("display enumeration: too many displays", -1) }
             capacity *= 2
         }
         func publicIDs(_ query: (UInt32, UnsafeMutablePointer<UInt32>?, UnsafeMutablePointer<UInt32>?) -> CGError) throws -> Set<UInt32> {
@@ -66,11 +66,11 @@ final class DisplayHardware: DisplayHardwareAccess {
                 var buffer = [UInt32](repeating: 0, count: Int(capacity))
                 var count: UInt32 = 0
                 let error = query(capacity, &buffer, &count)
-                guard error == .success else { throw DisplayFailure.system("состояние дисплеев", error.rawValue) }
+                guard error == .success else { throw DisplayFailure.system("display status lookup", error.rawValue) }
                 if count < capacity { return Set(buffer.prefix(Int(count))) }
                 capacity *= 2
             }
-            throw DisplayFailure.system("слишком много дисплеев", -1)
+            throw DisplayFailure.system("display enumeration: too many displays", -1)
         }
         let online = try publicIDs(CGGetOnlineDisplayList)
         let active = try publicIDs(CGGetActiveDisplayList)
@@ -123,18 +123,18 @@ final class DisplayHardware: DisplayHardwareAccess {
         var configuration: CGDisplayConfigRef?
         let begin = CGBeginDisplayConfiguration(&configuration)
         guard begin == .success, let configuration else {
-            throw DisplayFailure.system("начало переключения", begin.rawValue)
+            throw DisplayFailure.system("starting the display change", begin.rawValue)
         }
         let configured = enable(configuration, targetID, on)
         guard configured == .success else {
             CGCancelDisplayConfiguration(configuration)
-            throw DisplayFailure.system("переключение дисплея", configured.rawValue)
+            throw DisplayFailure.system("changing the display state", configured.rawValue)
         }
         // No persistent configuration. Emergency recovery writes an enabled
         // session state so it survives the watchdog's own exit.
         let commit = CGCompleteDisplayConfiguration(configuration, recovery ? .forSession : .forAppOnly)
         guard commit == .success else {
-            throw DisplayFailure.system("применение переключения", commit.rawValue)
+            throw DisplayFailure.system("applying the display change", commit.rawValue)
         }
     }
 

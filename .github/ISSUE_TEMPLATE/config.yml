@@ -1,6 +1,6 @@
 blank_issues_enabled: true
 contact_links:
-  - name: Download ScreenOff / Скачать приложение
+  - name: Download ScreenOff
     url: https://github.com/GevorgSogomonian/ScreenOff/releases/latest
     about: Install the latest release for Apple Silicon Macs running macOS 13 or later.
   - name: Report a security vulnerability privately
