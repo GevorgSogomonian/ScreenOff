@@ -26,7 +26,7 @@ bash Scripts/test.sh
 bash Scripts/build.sh
 ```
 
-`test.sh` exercises the display policy and recovery controller using simulated hardware. `build.sh` compiles and signs the app locally; it does not launch it. For changes to the window or launch behavior, also run:
+`test.sh` exercises the display policy, controller and production recovery supervisor using simulated hardware, and real subprocess timeout/cancellation using a harmless fault fixture. `build.sh` compiles and signs the app locally; it does not launch it. For changes to the window or launch behavior, also run:
 
 ```sh
 bash Scripts/test-interface.sh

@@ -78,6 +78,8 @@ enum DisplayFailure: LocalizedError {
     case mirroring
     case verification
     case watchdog
+    case sessionInactive
+    case displaysAsleep
 
     var errorDescription: String? {
         switch self {
@@ -91,6 +93,8 @@ enum DisplayFailure: LocalizedError {
         case .mirroring: return "Turn off mirroring in macOS Display settings, then try again."
         case .verification: return "macOS did not confirm the display change. Automatic disabling is paused until the monitor reconnects."
         case .watchdog: return "Display recovery protection is unavailable. The built-in display has been left on."
+        case .sessionInactive: return "Display disabling is paused while your Mac is locked."
+        case .displaysAsleep: return "Display recovery will continue when your displays wake."
         }
     }
 }

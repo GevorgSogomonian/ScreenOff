@@ -25,7 +25,6 @@ final class DisplayController: ObservableObject {
     private var activity = SessionResumeState()
     private let sessionProbe: () -> Bool?
     private var manualRecoveryHold = false
-    private var asleep: Bool { !activity.systemAwake }
     private var stopping = false
     private var notBefore = Date.distantPast
     private var hasDisabled = false
@@ -58,6 +57,7 @@ final class DisplayController: ObservableObject {
             notice = DisplayFailure.unavailable("the display-disabling API").localizedDescription
         }
         snapshot = (try? hardware.snapshot()) ?? snapshot
+        self.guardProcess.remember(snapshot)
     }
 
     var canToggle: Bool {
@@ -204,6 +204,10 @@ final class DisplayController: ObservableObject {
                 // Reuse the existing poll as a fallback for missed lock events.
                 if let active = self.sessionProbe() {
                     self.activity.setSessionActive(active, now: self.recoveryClock())
+                    if !active && self.hasDisabled {
+                        self.recoveryRequested = true
+                        self.guardProcess.requestRestore()
+                    }
                 }
                 self.updateSnapshot(try self.hardware.snapshot())
                 if self.activity.ready(now: self.recoveryClock()), !self.manualRecoveryHold,
@@ -225,7 +229,7 @@ final class DisplayController: ObservableObject {
                 }
                 guard self.hardware.supported else { return }
                 if self.hasDisabled {
-                    if desired || self.asleep || self.snapshot.lidClosed || self.snapshot.builtIn == nil ||
+                    if desired || self.activity.suspended || self.snapshot.lidClosed || self.snapshot.builtIn == nil ||
                         self.snapshot.builtInIsOn ||
                         self.protectedExternalIdentities.isDisjoint(with: self.snapshot.externalIdentities) {
                         self.recoveryRequested = true
@@ -241,21 +245,8 @@ final class DisplayController: ObservableObject {
                         self.releaseGuard()
                         return
                     }
-                    // Exactly one process owns restoration. Sending the same
-                    // synchronous configuration from both processes can make
-                    // SkyLight spin waiting for the other's reconfiguration.
-                    if self.delegateRecovery() {
-                        self.showRecoveryNotice()
-                        return
-                    }
-                    // Direct restoration is only a fallback when no active or
-                    // retiring helper can own it. Never start it during sleep.
-                    guard !self.asleep else { self.showRecoveryNotice(); return }
-                    guard self.recoveryAttempts.shouldAttempt(in: self.snapshot, now: self.recoveryClock()) else {
-                        self.showRecoveryNotice()
-                        return
-                    }
-                    try await self.transition(on: true)
+                    _ = self.delegateRecovery()
+                    self.showRecoveryNotice()
                     return
                 }
                 guard !self.activity.suspended, Date() >= self.notBefore else { return }
@@ -287,9 +278,8 @@ final class DisplayController: ObservableObject {
             protectedExternalIdentities = snapshot.externalIdentities
             protectedExternalIDs = Set(snapshot.externalDisplays.map(\.id))
         }
-        if !on || !delegateRecovery() {
-            try hardware.setBuiltIn(on: on, recovery: on)
-        }
+        if on { _ = delegateRecovery() }
+        else { guardProcess.requestDisable() }
         for _ in 0..<12 {
             try await Task.sleep(nanoseconds: verificationDelay)
             updateSnapshot(try hardware.snapshot())
@@ -324,14 +314,15 @@ final class DisplayController: ObservableObject {
     }
 
     /// A retiring helper still owns recovery even after its pipe was closed.
-    /// Only fall back to a local enable if there is no live helper and starting
-    /// a replacement failed. The watchdog remains independent of the UI.
+    /// The UI never falls back to a synchronous configuration: that call can
+    /// block indefinitely, including inside an apparently bounded retry loop.
     private func delegateRecovery() -> Bool {
         if guardProcess.isRunning {
             guardProcess.requestRestore()
             return true
         }
         guard guardProcess.canStart else { return true }
+        guard recoveryAttempts.shouldAttempt(in: snapshot, now: recoveryClock()) else { return false }
         do {
             try guardProcess.start(restoring: true)
             guardProcess.requestRestore()
@@ -345,6 +336,7 @@ final class DisplayController: ObservableObject {
         // Closing the lid on mains power need not emit sleep/lock events.
         // Reopening still needs to reapply the saved external-display mode.
         activity.setLidOpen(!value.lidClosed, now: recoveryClock())
+        guardProcess.remember(value)
         if snapshot != value { snapshot = value }
     }
 
@@ -365,12 +357,7 @@ final class DisplayController: ObservableObject {
         if hasDisabled {
             recoveryRequested = true
             if let state = try? hardware.snapshot() { updateSnapshot(state) }
-            // The helper owns rollback too; a failed verification must not
-            // launch a competing enable in the main process.
-            if !snapshot.builtInIsRestored, !delegateRecovery(), !asleep,
-               recoveryAttempts.shouldAttempt(in: snapshot, now: recoveryClock()) {
-                try? hardware.setBuiltIn(on: true, recovery: true)
-            }
+            if !snapshot.builtInIsRestored { _ = delegateRecovery() }
             showRecoveryNotice()
         } else {
             updateNotice(error.localizedDescription)
@@ -383,9 +370,6 @@ final class DisplayController: ObservableObject {
         if hasDisabled {
             recoveryRequested = true
             _ = delegateRecovery()
-            // Avoid a synchronous configuration in willSleep, while macOS is
-            // already reconfiguring its displays. The helper keeps the lease.
-            // Keep the helper and obligation through sleep/lid closure.
         }
     }
 
@@ -401,21 +385,26 @@ final class DisplayController: ObservableObject {
     }
 
     private static func readSessionActive() -> Bool? {
-        guard let state = CGSessionCopyCurrentDictionary() as? [String: Any] else { return nil }
-        let locked = state["CGSSessionScreenIsLocked"] as? Bool ?? false
-        let onConsole = state[kCGSessionOnConsoleKey as String] as? Bool ?? false
-        return !locked && onConsole
+        DisplayEnvironment.sessionActive()
     }
 
     private func sessionChanged(active: Bool) {
         // An early wake/session event must not bypass an actual lock screen.
         let confirmed = active ? (sessionProbe() ?? true) : false
         activity.setSessionActive(confirmed, now: recoveryClock())
+        if !confirmed && hasDisabled {
+            recoveryRequested = true
+            guardProcess.requestRestore()
+        }
         requestEvaluation()
     }
 
     private func screensChanged(awake: Bool) {
         activity.setScreensAwake(awake, now: recoveryClock())
+        if !awake && hasDisabled {
+            recoveryRequested = true
+            guardProcess.requestRestore()
+        }
         requestEvaluation()
     }
 
@@ -431,7 +420,8 @@ final class DisplayController: ObservableObject {
         for observer in observers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
         observers.removeAll()
         DistributedNotificationCenter.default().removeObserver(self)
-        // Let an in-flight transaction finish before restoring and terminating.
+        // Cancel an in-flight disable before awaiting UI verification.
+        if hasDisabled { recoveryRequested = true; guardProcess.requestRestore() }
         if let evaluation { await evaluation.value }
         if hasDisabled {
             recoveryRequested = true
@@ -456,7 +446,7 @@ final class DisplayController: ObservableObject {
             try await transition(on: true)
             print("PASS: built-in display restored and online")
         } catch {
-            _ = hardware.recover()
+            guardProcess.requestRestore()
             guardProcess.stop()
             throw error
         }

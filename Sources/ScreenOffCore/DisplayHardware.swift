@@ -20,7 +20,10 @@ final class DisplayHardware: DisplayHardwareAccess {
     private var recoveryTarget = BuiltInRecoveryTarget()
     let resolvedSymbol: String?
 
-    init() {
+    init(recoverySeed: DisplayInfo? = nil) {
+        if let seed = recoverySeed, seed.builtIn, seed.id != 0 {
+            recoveryTarget.observe(DisplaySnapshot(displays: [seed], lidClosed: false))
+        }
         let library = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY | RTLD_LOCAL)
         handle = library
         func symbol(_ names: [String]) -> (String, UnsafeMutableRawPointer)? {
@@ -88,17 +91,9 @@ final class DisplayHardware: DisplayHardwareAccess {
                                hasHardwareIdentity: DisplayHardwareIdentity.isUsableExternal(
                                 vendor: CGDisplayVendorNumber(id), model: CGDisplayModelNumber(id)))
         }
-        let result = DisplaySnapshot(displays: displays, lidClosed: isLidClosed())
+        let result = DisplaySnapshot(displays: displays, lidClosed: DisplayEnvironment.lidClosed() ?? true)
         recoveryTarget.observe(result)
         return result
-    }
-
-    private func isLidClosed() -> Bool {
-        let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
-        guard root != 0 else { return false }
-        defer { IOObjectRelease(root) }
-        return (IORegistryEntryCreateCFProperty(root, "AppleClamshellState" as CFString,
-                                               kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool) ?? false
     }
 
     /// Prefer the current built-in ID. When unplugging leaves only a headless
@@ -119,12 +114,19 @@ final class DisplayHardware: DisplayHardwareAccess {
         // SkyLight as a redundant transaction. Callers verify after yielding.
         if current.builtIn?.online == on && (!recovery || current.builtInIsRestored) { return }
         if !on {
+            guard DisplayEnvironment.sessionActive() == true else { throw DisplayFailure.sessionInactive }
             guard !current.lidClosed else { throw DisplayFailure.lidClosed }
             guard !current.externalDisplays.isEmpty else { throw DisplayFailure.noExternal }
             guard !current.displays.contains(where: { $0.online && $0.mirrored }) else { throw DisplayFailure.mirroring }
         }
         // The lid may have closed while obtaining the display configuration.
-        guard !isLidClosed() else { throw DisplayFailure.lidClosed }
+        guard DisplayEnvironment.lidClosed() == false else { throw DisplayFailure.lidClosed }
+        // A physical screen can sleep without the computer sleeping. Do not
+        // start a transaction while WindowServer is powering down its displays.
+        let online = current.displays.filter(\.online)
+        if !online.isEmpty && online.allSatisfy({ CGDisplayIsAsleep($0.id) != 0 }) {
+            throw DisplayFailure.displaysAsleep
+        }
         var configuration: CGDisplayConfigRef?
         let begin = CGBeginDisplayConfiguration(&configuration)
         guard begin == .success, let configuration else {
@@ -143,16 +145,4 @@ final class DisplayHardware: DisplayHardwareAccess {
         }
     }
 
-    /// Bounded explicit CLI probe. The watchdog uses persistent nonblocking
-    /// WatchdogRecovery steps instead, so it never abandons a missing panel.
-    /// Retrying obtains a fresh ID every time. Never disables any display.
-    func recover() -> Bool {
-        for _ in 0..<8 {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-            try? setBuiltIn(on: true, recovery: true)
-            RunLoop.current.run(until: Date().addingTimeInterval(0.35))
-            if let state = try? snapshot(), state.builtInIsRestored { return true }
-        }
-        return false
-    }
 }

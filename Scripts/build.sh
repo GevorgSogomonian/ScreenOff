@@ -13,7 +13,7 @@ mkdir -p "$BUILD/module-cache" "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 COMMON=(-swift-version 5 -O -target "$ARCH-apple-macos13.0" -module-cache-path "$BUILD/module-cache")
 xcrun swiftc "${COMMON[@]}" Sources/ScreenOffCore/*.swift Sources/ScreenOff/*.swift -o "$APP/Contents/MacOS/ScreenOff"
-xcrun swiftc "${COMMON[@]}" Sources/ScreenOffCore/*.swift Sources/ScreenOffWatchdog/main.swift -o "$APP/Contents/MacOS/ScreenOffWatchdog"
+xcrun swiftc "${COMMON[@]}" Sources/ScreenOffCore/*.swift Sources/ScreenOffWatchdog/*.swift -o "$APP/Contents/MacOS/ScreenOffWatchdog"
 xcrun swiftc -module-cache-path "$BUILD/module-cache" Scripts/MakeIcon.swift -o "$BUILD/make-icon"
 "$BUILD/make-icon" "$BUILD/AppIcon.iconset"
 iconutil -c icns "$BUILD/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"

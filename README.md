@@ -19,7 +19,7 @@ The power button in the window quits ScreenOff and restores the built-in display
 
 ## Installation
 
-1. Download `ScreenOff-1.3.1-arm64.dmg` from [Releases](https://github.com/GevorgSogomonian/ScreenOff/releases/latest). When updating, first quit the old ScreenOff using the power button in its window.
+1. Download `ScreenOff-1.3.2-arm64.dmg` from [Releases](https://github.com/GevorgSogomonian/ScreenOff/releases/latest). When updating, first quit the old ScreenOff using the power button in its window.
 2. Drag **ScreenOff.app → Applications** and replace the previous app if prompted.
 3. Open ScreenOff to see its single-switch settings. Use Spotlight or Applications in Finder to reopen the window later.
 
@@ -33,7 +33,7 @@ The app is **ad-hoc signed**, without an Apple Developer certificate or notariza
 - The display is disabled in WindowServer's display configuration and removed from the active desktop. Brightness and gamma are unchanged; ScreenOff does not cover the panel with a black window.
 - ScreenOff does not disable the last usable display. Disconnecting the last active external monitor restores the built-in display.
 - The switch saves your preference for external-monitor use. You can set it before connecting a monitor. Turning it on restores the built-in display immediately; turning it off disables the display when a suitable external monitor is connected.
-- Before sleep and when the lid closes, ScreenOff requests restoration. If the display is temporarily unavailable, recovery continues after wake and lid opening. Further disabling is blocked until restoration is confirmed.
+- Locking the Mac immediately requests restoration, before closing the lid. Display sleep, system sleep and lid closure pause configuration attempts. Recovery continues after wake and lid opening; further disabling is blocked until restoration is confirmed.
 - After unlock or wake, ScreenOff reapplies the saved preference even if the external monitor has not been reconnected. It waits for the displays to settle and the previous recovery helper to exit, which usually takes a few seconds. It does not start a new disable operation while the session is locked or inactive. Selecting both displays keeps both enabled.
 - Turning the switch off enables automatic disabling and registers launch at login through `SMAppService.mainApp`. ScreenOff shows instructions if macOS requires approval. Turning the switch on unregisters this login item. Settings do not open automatically at login.
 - Preferences from version 1.0.3 are preserved: the former automatic-off option being enabled corresponds to the current switch being off.
@@ -44,7 +44,9 @@ The app is **ad-hoc signed**, without an Apple Developer certificate or notariza
 
 Apple does not provide a public API for fully disabling an individual display. ScreenOff dynamically loads `SLSConfigureDisplayEnabled` / `CGSConfigureDisplayEnabled` and verifies the actual display state after changes. A macOS update can change this private API. If the required symbols are unavailable, ScreenOff opens but prevents disabling and explains why.
 
-Disabling uses an application-scoped configuration (`forAppOnly`); enabling uses the current session (`forSession`). Neither permanently changes the configuration. Before disabling, ScreenOff starts an independent `ScreenOffWatchdog`, which records connected external displays and monitors the main process. Cable removal, lid closure, a crash, a lost connection or a heartbeat gap longer than eight seconds triggers restoration. Recovery remains armed without a timeout, including when macOS temporarily stops enumerating the built-in display. The helper owns restoration; the main app observes its result instead of sending competing commands. A local fallback is allowed only when no live or retiring helper can recover the display. With the lid closed, recovery sends no display-configuration commands and waits for the lid to open without animation. With the lid open, retries for unchanged display state are limited to one every two seconds; topology changes allow immediate recovery. Protection ends only after the built-in display is confirmed active with the lid open.
+Disabling uses `forAppOnly`; enabling uses `forSession`. Neither permanently changes the configuration, but **exiting the process is not sufficient to undo the private disable** on the tested macOS build. An independent `ScreenOffWatchdog` remains responsible for recovery. The app and supervisor never perform a display-configuration call themselves: each change runs in a disposable child with a three-second timeout. Locking requests restoration immediately. Sleep and lid closure can cancel the child while the supervisor continues watching for wake. No new transaction starts before the previous child exits.
+
+A timed-out transaction waits for a real wake, lid, session or external-topology change before retrying, preventing a continuous CPU/retry loop. With a closed lid or sleeping displays, the supervisor sends no configuration commands. It retains the remembered built-in ID and recovery obligation until the panel is confirmed active with the lid open. These changes address the reported lock → close lid → unplug recovery path; the exact physical sequence that previously required a forced reset has not yet been repeated with 1.3.2. See [Verification](Docs/Verification.md).
 
 Since version 1.0.3, ScreenOff handles macOS removing the built-in display from enumeration and creating a virtual placeholder. It excludes that placeholder from external monitors and can recover using the last positively identified built-in display ID. This fallback is allowed only for enabling, with the lid open and no usable external display; a newly discovered ID always takes priority. These are recovery mechanisms, not a guarantee against macOS failures.
 
@@ -61,7 +63,7 @@ If the macOS API does not respond, close and open the lid or reconnect the monit
 Install Xcode Command Line Tools; the full Xcode application is not required.
 
 ```sh
-bash Scripts/test.sh       # Simulated policy, controller and recovery checks
+bash Scripts/test.sh       # Simulated recovery and real subprocess timeout checks
 bash Scripts/build.sh      # dist/ScreenOff.app
 bash Scripts/package.sh    # App, DMG, ZIP and SHA256SUMS.txt
 ```

@@ -4,7 +4,7 @@ import Darwin
 
 /// Opt-in hardware test. Closing the heartbeat pipe simulates lost contact
 /// while this parent remains alive, proving restoration comes from the helper
-/// rather than relying solely on WindowServer's application-exit rollback.
+/// without assuming that WindowServer rolls back a private disable at app exit.
 @main
 enum WatchdogIntegration {
     @MainActor static func main() {
@@ -36,7 +36,6 @@ enum WatchdogIntegration {
         input.fileHandleForReading.closeFile()
         output.fileHandleForWriting.closeFile()
         defer {
-            _ = hardware.recover()
             try? input.fileHandleForWriting.close()
             try? output.fileHandleForReading.close()
         }
@@ -44,9 +43,15 @@ enum WatchdogIntegration {
         guard poll(&descriptor, 1, 3000) > 0,
               String(data: output.fileHandleForReading.availableData, encoding: .utf8) == "READY\n"
         else { throw DisplayFailure.watchdog }
-        try hardware.setBuiltIn(on: false)
-        try await Task.sleep(nanoseconds: 400_000_000)
-        guard try !hardware.snapshot().builtInIsOn else { throw DisplayFailure.verification }
+        var disable: UInt8 = 3
+        guard Darwin.write(input.fileHandleForWriting.fileDescriptor, &disable, 1) == 1
+        else { throw DisplayFailure.watchdog }
+        var disabled = false
+        for _ in 0..<20 {
+            try await Task.sleep(nanoseconds: 200_000_000)
+            if try !hardware.snapshot().builtInIsOn { disabled = true; break }
+        }
+        guard disabled else { throw DisplayFailure.verification }
         print("PASS: panel disabled with independent helper ready")
         try input.fileHandleForWriting.close()
         for _ in 0..<20 {
