@@ -159,7 +159,23 @@ enum ScreenOffApp {
             _ = NSApplication.shared
             DistributedNotificationCenter.default().postNotificationName(
                 DisplayController.recoverNotification, object: nil, userInfo: nil, deliverImmediately: true)
-            let restored = DisplayHardware().recover()
+            let hardware = DisplayHardware()
+            // A running app/helper already owns restoration. Observe its result
+            // instead of adding a third competing WindowServer configuration.
+            let deadline = Date().addingTimeInterval(12)
+            var restored = false
+            repeat {
+                let owners = NSRunningApplication.runningApplications(
+                    withBundleIdentifier: "com.gevorg.screenoff").filter {
+                        $0.processIdentifier != getpid() && !$0.isTerminated
+                    }
+                if owners.isEmpty {
+                    restored = hardware.recover()
+                    break
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                restored = (try? hardware.snapshot().builtInIsRestored) == true
+            } while !restored && Date() < deadline
             print(restored ? "Built-in display restored." : "Recovery failed. Close and reopen the lid, or reconnect the external display.")
             exit(restored ? 0 : 1)
         }
