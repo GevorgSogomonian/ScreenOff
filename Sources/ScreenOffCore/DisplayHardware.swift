@@ -114,7 +114,7 @@ final class DisplayHardware: DisplayHardwareAccess {
         // SkyLight as a redundant transaction. Callers verify after yielding.
         if current.builtIn?.online == on && (!recovery || current.builtInIsRestored) { return }
         if !on {
-            guard DisplayEnvironment.sessionActive() == true else { throw DisplayFailure.sessionInactive }
+            guard DisplayEnvironment.sessionAvailable() == true else { throw DisplayFailure.sessionInactive }
             guard !current.lidClosed else { throw DisplayFailure.lidClosed }
             guard !current.externalDisplays.isEmpty else { throw DisplayFailure.noExternal }
             guard !current.displays.contains(where: { $0.online && $0.mirrored }) else { throw DisplayFailure.mirroring }

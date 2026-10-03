@@ -21,3 +21,18 @@ xcrun swiftc -swift-version 5 -module-cache-path .build/module-cache \
     Sources/ScreenOffCore/DisplayPolicy.swift Sources/ScreenOffCore/DisplayTransaction.swift \
     Tests/TransactionTests.swift -o .build/transaction-tests
 .build/transaction-tests "$PWD/.build/transaction-fixture"
+
+xcrun swiftc -swift-version 5 -module-cache-path .build/module-cache \
+    Sources/ScreenOffCore/DisplayRoleOverride.swift Tests/DisplayRoleTests.swift -o .build/display-role-tests
+.build/display-role-tests
+
+xcrun swiftc -swift-version 5 -D ROLE_HELPER_TEST -module-cache-path .build/module-cache \
+    Sources/ScreenOffCore/DisplayRoleOverride.swift Sources/ScreenOffCore/DisplayPolicy.swift \
+    Sources/ScreenOffCore/BuiltInRecoveryTarget.swift Sources/ScreenOffDisplayRole/RoleHelper.swift \
+    Tests/RoleHelperTests.swift -o .build/role-helper-tests
+.build/role-helper-tests
+
+xcrun swiftc -swift-version 5 -module-cache-path .build/module-cache \
+    Sources/ScreenOffCore/DisplayEnvironment.swift Sources/ScreenOffCore/WatchdogRules.swift \
+    Tests/SessionPolicyTests.swift -o .build/session-policy-tests
+.build/session-policy-tests

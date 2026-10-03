@@ -49,7 +49,7 @@ final class DisplayController: ObservableObject {
         self.previewOnly = previewOnly
         self.recoveryAttempts = RecoveryAttemptGate(retryDelay: recoveryRetryDelay)
         self.recoveryClock = recoveryClock
-        self.sessionProbe = sessionProbe ?? (testing ? { nil } : { Self.readSessionActive() })
+        self.sessionProbe = sessionProbe ?? (testing ? { nil } : { Self.readSessionActive() ?? false })
         let saved = automaticPreference ?? (!testing && preferences.bool(forKey: "automaticDisplayOff"))
         policy = DisplayPolicy(automatic: saved)
         automatic = saved
@@ -59,6 +59,8 @@ final class DisplayController: ObservableObject {
         snapshot = (try? hardware.snapshot()) ?? snapshot
         self.guardProcess.remember(snapshot)
     }
+
+    var displayRolePreviewOnly: Bool { testing || previewOnly }
 
     var canToggle: Bool {
         hardware.supported && !busy && !recoveryRequested && !snapshot.lidClosed && snapshot.builtIn != nil
@@ -134,7 +136,8 @@ final class DisplayController: ObservableObject {
     }
 
     func displaysChanged(displayID: UInt32? = nil, flags: CGDisplayChangeSummaryFlags = []) {
-        if let displayID, hasDisabled, protectedExternalIDs.contains(displayID),
+        if let displayID, hasDisabled, activity.systemAwake, activity.screensAwake,
+           protectedExternalIDs.contains(displayID),
            !flags.intersection([.removeFlag, .disabledFlag]).isEmpty {
             // An explicit removal wins even if CoreGraphics still exposes an
             // old active list or creates a temporary headless virtual display.
@@ -201,7 +204,7 @@ final class DisplayController: ObservableObject {
             guard let self else { return }
             defer { self.evaluation = nil }
             do {
-                // Reuse the existing poll as a fallback for missed lock events.
+                // Poll console ownership; a lock does not relinquish this user’s session.
                 if let active = self.sessionProbe() {
                     self.activity.setSessionActive(active, now: self.recoveryClock())
                     if !active && self.hasDisabled {
@@ -209,7 +212,23 @@ final class DisplayController: ObservableObject {
                         self.guardProcess.requestRestore()
                     }
                 }
+                // Do not query WindowServer while physical displays are asleep.
+                // Lid sensing remains independent so recovery can resume on open.
+                if !self.testing {
+                    self.activity.setLidOpen(DisplayEnvironment.lidClosed() == false, now: self.recoveryClock())
+                    if !self.activity.lidOpen && self.hasDisabled {
+                        self.recoveryRequested = true
+                        self.guardProcess.requestRestore()
+                    }
+                    guard self.activity.systemAwake, self.activity.screensAwake, self.activity.lidOpen else { return }
+                }
                 self.updateSnapshot(try self.hardware.snapshot())
+                if !self.activity.lidOpen && self.hasDisabled {
+                    self.recoveryRequested = true
+                    self.guardProcess.requestRestore()
+                }
+                // Tests use simulated snapshots to detect lid transitions even during sleep.
+                guard self.activity.systemAwake, self.activity.screensAwake else { return }
                 if self.activity.ready(now: self.recoveryClock()), !self.manualRecoveryHold,
                    !self.hasDisabled, !self.recoveryRequested,
                    self.snapshot.builtInIsRestored, self.snapshot.canDisable,
@@ -218,7 +237,13 @@ final class DisplayController: ObservableObject {
                     self.policy.setAutomatic(self.automatic)
                     self.updateNotice(nil)
                 }
-                let desired = self.policy.wantsBuiltInOn(for: self.snapshot)
+                let policyDesired = self.policy.wantsBuiltInOn(for: self.snapshot)
+                // A known disabled panel may disappear from enumeration while
+                // the protected external is still active. Keep its existing lease.
+                let keepMissingPanelOff = self.hasDisabled && self.automatic && !self.policy.inhibited
+                    && self.snapshot.builtIn == nil && !self.snapshot.externalDisplays.isEmpty
+                    && !self.snapshot.displays.contains(where: { $0.online && $0.mirrored })
+                let desired = keepMissingPanelOff ? false : policyDesired
                 if !self.hasDisabled && self.snapshot.builtIn != nil &&
                     !self.snapshot.builtInIsOn && !self.snapshot.lidClosed {
                     // A previous process or a sleep transition may have left
@@ -229,14 +254,15 @@ final class DisplayController: ObservableObject {
                 }
                 guard self.hardware.supported else { return }
                 if self.hasDisabled {
-                    if desired || self.activity.suspended || self.snapshot.lidClosed || self.snapshot.builtIn == nil ||
-                        self.snapshot.builtInIsOn ||
+                    if desired || !self.activity.sessionActive || self.snapshot.lidClosed ||
                         self.protectedExternalIdentities.isDisjoint(with: self.snapshot.externalIdentities) {
                         self.recoveryRequested = true
                     }
                     if !self.guardProcess.isRunning {
+                        let unexpectedExit = !self.recoveryRequested
                         self.recoveryRequested = true
                         self.policy.stopAfterFailure()
+                        if unexpectedExit && self.activity.sessionActive { self.activity.consume() }
                     }
                 }
                 if self.recoveryRequested {
@@ -254,6 +280,12 @@ final class DisplayController: ObservableObject {
                 if self.activity.pending && self.hasDisabled && !self.snapshot.builtInIsOn {
                     // The display stayed off throughout a short lock cycle.
                     self.activity.consume()
+                }
+                if !desired && self.snapshot.builtInIsOn && self.hasDisabled {
+                    // Keep the existing recovery lease when macOS reactivates the panel.
+                    self.activity.consume()
+                    self.guardProcess.requestDisable()
+                    return
                 }
                 if !desired && self.snapshot.builtInIsOn {
                     // A restoring predecessor must finish before a new helper
@@ -367,10 +399,8 @@ final class DisplayController: ObservableObject {
 
     private func prepareForSleep() {
         activity.setSystemAwake(false, now: recoveryClock())
-        if hasDisabled {
-            recoveryRequested = true
-            _ = delegateRecovery()
-        }
+        // The independent helper preserves a completed disable and pauses its
+        // worker during sleep. An in-flight transition rolls back on cancellation.
     }
 
     @objc private func emergencyRestore() {
@@ -385,12 +415,13 @@ final class DisplayController: ObservableObject {
     }
 
     private static func readSessionActive() -> Bool? {
-        DisplayEnvironment.sessionActive()
+        DisplayEnvironment.sessionAvailable()
     }
 
     private func sessionChanged(active: Bool) {
-        // An early wake/session event must not bypass an actual lock screen.
-        let confirmed = active ? (sessionProbe() ?? true) : false
+        // Session-resign notifications may accompany locking. Prefer actual
+        // console ownership; absent evidence still fails toward restoration.
+        let confirmed = sessionProbe() ?? active
         activity.setSessionActive(confirmed, now: recoveryClock())
         if !confirmed && hasDisabled {
             recoveryRequested = true
@@ -401,14 +432,10 @@ final class DisplayController: ObservableObject {
 
     private func screensChanged(awake: Bool) {
         activity.setScreensAwake(awake, now: recoveryClock())
-        if !awake && hasDisabled {
-            recoveryRequested = true
-            guardProcess.requestRestore()
-        }
         requestEvaluation()
     }
 
-    @objc private func sessionLocked() { sessionChanged(active: false) }
+    @objc private func sessionLocked() { sessionChanged(active: true) }
     @objc private func sessionUnlocked() { sessionChanged(active: true) }
 
     func stop() async -> Bool {
@@ -467,6 +494,8 @@ extension DisplayController {
     }
     func testSleep() { prepareForSleep() }
     func testSession(active: Bool) { sessionChanged(active: active) }
+    func testLock() { sessionLocked() }
+    func testUnlock() { sessionUnlocked() }
     func testScreens(awake: Bool) { screensChanged(awake: awake) }
     func testWake() { activity.setSystemAwake(true, now: recoveryClock()); requestEvaluation() }
     func testFinishSettling() { notBefore = .distantPast }

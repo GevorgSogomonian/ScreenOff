@@ -88,7 +88,7 @@ final class FakeRecoveryGuard: RecoveryGuarding {
         _ = engine.step(using: hardware, now: clock())
     }
     func requestDisable() {
-        guard isRunning else { return }
+        guard isRunning, !engine.requested else { return }
         try? hardware?.setBuiltIn(on: false, recovery: false)
     }
     func remember(_ snapshot: DisplaySnapshot) {}
@@ -319,10 +319,10 @@ enum RecoveryControllerTests {
         }
         do {
             let (controller, hardware, _) = await disabled()
-            hardware.state = fixture() // Helper has restored, but has not exited yet.
+            hardware.state = fixture() // macOS reactivated the panel without a restore request.
             await controller.testEvaluate()
-            expect(hardware.calls.filter { !$0.on }.count == 1,
-                   "controller cannot race helper by disabling a just-restored panel")
+            expect(hardware.calls.filter { !$0.on }.count == 2 && !hardware.state.builtInIsOn,
+                   "macOS reactivation is reapplied through the existing helper")
         }
         do {
             let (controller, hardware, helper) = await disabled()
@@ -333,7 +333,9 @@ enum RecoveryControllerTests {
         }
         await testRecordedHotplug()
         await testNightRecovery()
-        await testUnlockRecovery()
+        await testFailedLockedWake()
+        await testLockedPreference()
+        await testConsoleReturnRecovery()
         await testRecoveryOwnership()
         print("PASS: \(checks) controller and persistent-recovery checks (simulated hardware only)")
     }
@@ -404,8 +406,8 @@ enum RecoveryControllerTests {
         let (sleeping, duringSleep, sleeper) = await disabled()
         sleeper.automaticallyStep = false
         sleeping.testSleep()
-        expect(duringSleep.mainEnableCalls == 0 && sleeper.restoreRequests > 0,
-               "willSleep delegates without synchronously reconfiguring WindowServer")
+        expect(duringSleep.mainEnableCalls == 0 && sleeper.restoreRequests == 0,
+               "willSleep preserves confirmed disabling without reconfiguring WindowServer")
         let confirmed = await sleeping.stop()
         expect(!confirmed && duringSleep.mainEnableCalls == 0 && sleeper.stops == 1,
                "quit hands pending recovery to the helper without racing or killing it")
@@ -433,10 +435,98 @@ enum RecoveryControllerTests {
         withExtendedLifetime(observation) {}
     }
 
-    static func testUnlockRecovery() async {
+    static func testLockedPreference() async {
+        for sleepKind in ["none", "display", "system"] {
+            var now: TimeInterval = 0
+            let (controller, hardware, helper) = make(recoveryClock: { now })
+            await controller.testEvaluate()
+            controller.testLock()
+            await controller.testEvaluate()
+            expect(!hardware.state.builtInIsOn && helper.restoreRequests == 0,
+                   "lock retains the confirmed OFF preference: \(sleepKind)")
+            let initialCalls = hardware.calls.count
+            if sleepKind == "display" { controller.testScreens(awake: false) }
+            if sleepKind == "system" { controller.testSleep() }
+            if sleepKind != "none" {
+                for _ in 0..<20 { now += 1_440; await controller.testEvaluate() }
+                expect(hardware.calls.count == initialCalls && helper.restoreRequests == 0,
+                       "locked sleep never proactively enables the panel: \(sleepKind)")
+                controller.testScreens(awake: true)
+                controller.testWake()
+                now += 3
+                controller.testFinishSettling()
+                await controller.testEvaluate()
+                expect(!hardware.state.builtInIsOn && hardware.calls.count == initialCalls,
+                       "locked wake with preserved OFF state needs no transaction: \(sleepKind)")
+            }
+            hardware.state = fixture() // macOS reactivated the built-in while still locked.
+            await controller.testEvaluate()
+            expect(!hardware.state.builtInIsOn && helper.starts == [false] && helper.restoreRequests == 0,
+                   "locked reactivation reapplies OFF without retiring its rescue helper: \(sleepKind)")
+            controller.testUnlock()
+            await controller.testEvaluate()
+            expect(!hardware.state.builtInIsOn && helper.restoreRequests == 0,
+                   "unlock does not flash the already disabled panel: \(sleepKind)")
+            hardware.state = fixture(on: false, externals: [])
+            await controller.testEvaluate()
+            expect(hardware.state.builtInIsRestored && helper.restoreRequests > 0,
+                   "locked/unlocked unplug restores the only usable display: \(sleepKind)")
+        }
+        do {
+            let (controller, hardware, helper) = await disabled()
+            controller.testLock()
+            hardware.state = fixture(on: false, present: false)
+            await controller.testEvaluate()
+            expect(helper.restoreRequests == 0 && helper.isRunning,
+                   "a disabled panel missing from enumeration retains its protected external lease")
+            hardware.state = fixture(on: false, present: false, externals: [])
+            await controller.testEvaluate()
+            expect(controller.testRecoveryRequested && helper.restoreRequests > 0,
+                   "missing panel still requests remembered-ID recovery after unplug")
+        }
+        do {
+            let (controller, hardware, helper) = await disabled()
+            controller.testLock()
+            controller.testSession(active: false) // Switch user or log out.
+            expect(hardware.state.builtInIsRestored && helper.restoreRequests > 0,
+                   "losing console ownership still restores immediately")
+        }
+        do {
+            let (controller, hardware, helper) = await disabled()
+            controller.testLock()
+            controller.setUsesBuiltInWithExternal(true)
+            await controller.testEvaluate()
+            expect(hardware.state.builtInIsRestored && helper.restoreRequests > 0,
+                   "explicit ON overrides a retained locked lease")
+        }
+    }
+
+    static func testFailedLockedWake() async {
+        var now: TimeInterval = 0
+        let (controller, hardware, helper) = make(recoveryClock: { now })
+        await controller.testEvaluate()
+        controller.testLock()
+        controller.testSleep()
+        controller.testWake()
+        now = 3
+        controller.testFinishSettling()
+        hardware.state = fixture() // Helper recovered after its wake reapply failed.
+        helper.isRunning = false
+        await controller.testEvaluate()
+        for _ in 0..<20 {
+            now += 3
+            controller.testWake() // Duplicate notification cannot renew a retry ticket.
+            controller.testFinishSettling()
+            await controller.testEvaluate()
+        }
+        expect(hardware.state.builtInIsOn && hardware.calls.filter { !$0.on }.count == 1,
+               "unexpected wake helper failure cannot reuse a stale resume ticket to disable again")
+    }
+
+    static func testConsoleReturnRecovery() async {
         // The original external UUID never changes, so the old policy would
         // stay inhibited after the helper restored during a lock/sleep cycle.
-        for trigger in ["lock", "display-sleep", "system-sleep"] {
+        for trigger in ["console-leave", "display-sleep", "system-sleep"] {
             var now: TimeInterval = 0
             let (controller, hardware, helper) = make(recoveryClock: { now })
             await controller.testEvaluate()
@@ -450,10 +540,10 @@ enum RecoveryControllerTests {
             controller.testScreens(awake: true)
             controller.testWake()
             await controller.testEvaluate()
-            expect(hardware.state.builtInIsOn, "wake before unlock cannot disable: \(trigger)")
+            expect(hardware.state.builtInIsOn, "wake while outside the owner console cannot disable: \(trigger)")
             controller.testSession(active: true)
             await controller.testEvaluate()
-            expect(hardware.state.builtInIsOn, "unlock waits for link settling: \(trigger)")
+            expect(hardware.state.builtInIsOn, "console return waits for link settling: \(trigger)")
             helper.canStart = false
             now += 3
             controller.testFinishSettling()
@@ -463,15 +553,15 @@ enum RecoveryControllerTests {
             helper.canStart = true
             await controller.testEvaluate()
             expect(!hardware.state.builtInIsOn && helper.isRunning && helper.starts == [false, false],
-                   "unlock reapplies OFF with a new ready helper on unchanged external: \(trigger)")
-            expect(!controller.usesBuiltInWithExternal, "unlock preserves the saved switch: \(trigger)")
+                   "console return reapplies OFF with a new ready helper on unchanged external: \(trigger)")
+            expect(!controller.usesBuiltInWithExternal, "console return preserves the saved switch: \(trigger)")
         }
         do {
             var now: TimeInterval = 0
             var active = false
             let (controller, hardware, _) = make(recoveryClock: { now }, sessionProbe: { active })
             await controller.testEvaluate()
-            expect(hardware.calls.isEmpty, "cold launch on lock screen never disables")
+            expect(hardware.calls.isEmpty, "cold launch outside the owner console never disables")
             active = true // Both distributed notifications were missed.
             await controller.testEvaluate()
             expect(hardware.calls.isEmpty, "polled unlock also waits for settling")
@@ -539,7 +629,7 @@ enum RecoveryControllerTests {
             let (controller, hardware, helper) = make(recoveryClock: { now })
             await controller.testEvaluate()
             controller.testSession(active: false)
-            expect(hardware.state.builtInIsRestored, "short lock immediately requests restoration")
+            expect(hardware.state.builtInIsRestored, "console leave immediately requests restoration")
             await controller.testEvaluate()
             controller.testSession(active: true)
             now = 3

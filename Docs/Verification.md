@@ -162,8 +162,8 @@ The integration harness runs a full `NSApplication` event loop. A plain synchron
 - Unplug the last external while built-in is off; the built-in must return.
 - Reconnect with automatic mode enabled; the built-in must turn off after settling.
 - Turn the single preference ON; the built-in must restore and stay on across external reconnections. Turn it OFF again to resume automatic disabling.
-- Lock, wait for display sleep, then unlock with the same external attached; after recovery and settling, the OFF preference must automatically disable the built-in again.
-- Sleep and wake with an external attached; recovery must complete first, then the saved mode must resume once the session and displays are ready.
+- Lock and wake with the same external attached; the confirmed OFF preference should remain applied without ScreenOff proactively restoring the built-in. If macOS reactivates the panel, verify supervised reapplication.
+- Sleep and wake with an external attached; preserve a confirmed disable. An interrupted transaction still requires rollback before further disabling.
 - Close/open the lid; the pending restoration must survive and complete once the panel becomes active.
 - Quit while off; the built-in must return and the helper must exit.
 - Remove external during a transition; the built-in must recover.
@@ -172,3 +172,34 @@ The integration harness runs a full `NSApplication` event loop. A plain synchron
 - Try a mirrored layout; the app must leave it unchanged and explain the prerequisite.
 
 These physical hotplug, sleep and login scenarios require manual hardware interaction; unit checks alone do not establish them.
+
+## Night Shift exclusion development checks (2026-10-03)
+
+- `bash Scripts/build.sh`: passed outside the execution sandbox, including helper signing and bundle verification. The sandbox blocked `iconutil`; no build-script workaround was needed.
+- `bash Scripts/test.sh`: 299 checks passed outside the execution sandbox. This includes 21 plist/role checks and seven read-only helper boundary checks. The sandbox does not expose `kern.boottime`; the unsandboxed boot-identity check passed.
+- Native settings render: 374 × 395 pt with one preview monitor; visually inspected for complete content and readable controls.
+- `bash Scripts/test-interface.sh`: failed at “reopen brings settings to the foreground.” A separate app built from the original HEAD versions of App, SettingsView, DisplayController and RecoveryGuard failed at the same assertion on this host. Full focus/reopening UI verification remains incomplete.
+- No administrator override was applied to a physical monitor. Post-restart Night Shift output, True Tone exclusion and hardware compatibility are unverified.
+
+### Manual monitor verification
+
+1. Quit the previously installed ScreenOff and open the new local build. Keep the built-in display enabled and connect the external monitor.
+2. In macOS enable Night Shift and observe both displays. Enable the external monitor’s own eye-care mode.
+3. In ScreenOff, enable the monitor under “Exclude from Night Shift,” approve the system administrator prompt, and restart when convenient.
+4. Enable Night Shift again. Confirm that the built-in screen changes warmth while the external screen keeps only its hardware eye-care effect. Check the external monitor’s normal resolution, refresh rate and HDR behavior as the television role may affect compatibility.
+5. Disconnect/reconnect and sleep/wake; confirm the exclusion persists. Verify ordinary built-in-display disabling and recovery still work.
+6. Turn the exclusion switch off (restoration is available even with the monitor disconnected), restart, and confirm the original macOS behavior returns. Restore exclusions before uninstalling.
+
+## Lock and sleep preservation development checks (2026-10-03)
+
+- `bash Scripts/test.sh`: 369 checks passed. Coverage includes owner-console versus switched-user/unknown sessions, lock retention, eight-hour display/system sleep with no enable transaction, wake without a transaction when OFF survives, supervised reapplication if macOS reactivates the panel, failure inhibition, interrupted-worker rollback, and locked close-lid unplug recovery using the remembered panel ID.
+- `bash Scripts/build.sh`: passed, including code signing and bundle verification.
+- A read-only probe on the host returned `Own console available: true` for the unlocked owner session. Actual locked-session dictionary behavior is not yet verified.
+- The installed app was replaced after the old recovery helper exited; the previous version was backed up under `/private/tmp`. Native UI confirmed the existing OFF preference, external-only operation and the existing Night Shift exclusion remained selected.
+- Physical lock, sleep/wake, fast user switching and unplug during lock were not driven automatically. Zero-flash wake behavior remains unverified; simulated success is not a hardware guarantee.
+
+Manual acceptance: with the lid open and external monitor active, turn “Use built-in display” OFF, lock using Control-Command-Q, and confirm the panel stays off. Let the Mac sleep, wake while still locked, and check for any flash. Confirm unplugging the external restores the built-in lock screen. Then repeat lock → close lid → unplug → open lid, and verify the remembered-panel recovery. A failure should leave recovery armed or keep the built-in screen enabled, rather than repeatedly launching disable transactions.
+
+## Owner-reported validation (2026-10-03)
+
+After applying the Night Shift exclusion, the owner reported that it appeared to work and requested installation of the new build. After installing the lock/sleep preservation build, the owner reported that it works as well. These reports confirm the owner’s observed behavior on the affected Mac; they do not establish that every manual regression scenario above, fast user switching, role restoration or zero-flash wake was explicitly tested. Agent-driven physical verification was limited to graceful replacement and the installed app returning to external-only mode with the existing exclusion selected.

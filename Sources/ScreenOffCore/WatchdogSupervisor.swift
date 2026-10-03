@@ -24,6 +24,7 @@ final class WatchdogSupervisor {
     private var systemAwake = true
     private var snapshotAfterTransaction = true
     private var awaitingVerification = false
+    private var disabledConfirmed = false
 
     init(snapshot: DisplaySnapshot, worker: any DisplayTransactionRunning, seed: DisplayInfo? = nil,
          clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
@@ -38,7 +39,11 @@ final class WatchdogSupervisor {
     }
 
     func requestDisable() {
-        guard !hasDisabled, !recoveryRequested, !worker.isRunning,
+        // Repeated IPC and wake observations must not overlap a child or
+        // renew a failed transaction. A confirmed lease may be reapplied.
+        guard !worker.isRunning, !retryBlocked, !awaitingVerification, clock() >= retryAt else { return }
+        if hasDisabled && (!snapshotAfterTransaction || !disabledConfirmed || !snapshot.builtInIsRestored) { return }
+        guard !recoveryRequested,
               lidClosed == false, sessionActive, screensAwake, systemAwake,
               snapshot.builtInIsRestored, snapshot.canDisable else {
             requestRestore()
@@ -67,14 +72,14 @@ final class WatchdogSupervisor {
         guard screensAwake != awake else { return }
         screensAwake = awake
         if awake { systemAwake = true; allowRetry() }
-        else { suspend() }
+        else { suspend(recover: false) }
     }
 
     func systemChanged(awake: Bool) {
         guard systemAwake != awake else { return }
         systemAwake = awake
         if awake { screensAwake = true; allowRetry() }
-        else { suspend() }
+        else { suspend(recover: false) }
     }
 
     func lidChanged(closed: Bool?) {
@@ -86,7 +91,7 @@ final class WatchdogSupervisor {
             systemAwake = true
             screensAwake = true
             allowRetry()
-        } else { suspend() }
+        } else { suspend(recover: true) }
     }
 
     func externalRemoved() {
@@ -102,9 +107,12 @@ final class WatchdogSupervisor {
         awaitingVerification = false
         if let panel = state.builtIn { seed = panel }
         lidChanged(closed: state.lidClosed)
-        if hasDisabled && (protectedExternals.isDisjoint(with: state.externalIdentities)
-                          || (state.builtInIsOn && !worker.isRunning)) {
+        if hasDisabled && protectedExternals.isDisjoint(with: state.externalIdentities) {
             requestRestore()
+        }
+        if hasDisabled && !worker.isRunning {
+            if state.builtInIsOn && !disabledConfirmed { requestRestore() }
+            if state.builtIn != nil && !state.builtInIsOn { disabledConfirmed = true }
         }
         if recoveryRequested && !worker.isRunning && state.builtInIsRestored {
             if clock() - lastConfirmation >= 0.4 {
@@ -116,14 +124,23 @@ final class WatchdogSupervisor {
     }
 
     func tick() {
+        // If macOS reactivates the panel on wake, reapply through the same
+        // bounded transaction while the protected external is still usable.
+        if hasDisabled, !recoveryRequested, sessionActive, screensAwake, systemAwake,
+           lidClosed == false, snapshotAfterTransaction, snapshot.canDisable,
+           snapshot.builtInIsRestored, !protectedExternals.isDisjoint(with: snapshot.externalIdentities) {
+            requestDisable()
+        }
         guard recoveryRequested, !worker.isRunning, lidClosed == false,
               screensAwake, systemAwake, !retryBlocked, !awaitingVerification, clock() >= retryAt,
               !(snapshotAfterTransaction && snapshot.builtInIsRestored) else { return }
         launch(on: true)
     }
 
-    private func suspend() {
-        requestRestore()
+    private func suspend(recover: Bool) {
+        // A confirmed disable survives sleep. An interrupted transaction has
+        // uncertain effects and must retain rollback responsibility.
+        if recover || worker.isRunning { recoveryRequested = true }
         // Sleep can interrupt an enable too. Stop only the disposable worker;
         // this supervisor and its remembered target survive until actual wake.
         if worker.isRunning { worker.cancel() }
@@ -137,6 +154,7 @@ final class WatchdogSupervisor {
 
     private func launch(on: Bool) {
         workerEnabling = on
+        if !on { disabledConfirmed = false }
         snapshotAfterTransaction = false
         generation += 1
         do {

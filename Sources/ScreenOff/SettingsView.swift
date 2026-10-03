@@ -77,6 +77,10 @@ struct SettingsView: View {
             }
             .padding(.top, 14)
 
+            DisplayRoleSettingsView(topology: controller.snapshot, displayBusy: controller.busy,
+                                    previewOnly: controller.displayRolePreviewOnly)
+                .padding(.top, 16)
+
         }
         .padding(20)
         .frame(width: 374)
