@@ -9,7 +9,7 @@ private final class DisplayQuerySource: @unchecked Sendable {
     init(seed: DisplayInfo?) { hardware = DisplayHardware(recoverySeed: seed) }
     func read(_ completion: @escaping @Sendable (DisplaySnapshot?, Bool?) -> Void) {
         queue.async {
-            completion(try? self.hardware.snapshot(), DisplayEnvironment.sessionActive())
+            completion(try? self.hardware.snapshot(), DisplayEnvironment.sessionAvailable())
         }
     }
 }
@@ -25,7 +25,7 @@ final class WatchdogRuntime: NSObject {
     private var timer: Timer?
     private var observers: [NSObjectProtocol] = []
     private var pendingRestore: Bool
-    private var lastHeartbeat = ProcessInfo.processInfo.systemUptime
+    private var heartbeatLease = WatchdogHeartbeat(now: ProcessInfo.processInfo.systemUptime)
     private var pipeOpen = true
     private var queryStarted: TimeInterval?
     private var screensAwake = true
@@ -33,6 +33,7 @@ final class WatchdogRuntime: NSObject {
     private var sessionActive = true
     private var protectedIDs: Set<UInt32> = []
     private var previousLid: Bool?
+    private var activityGeneration = 0
 
     init(parent: Int32, restoring: Bool, seed: DisplayInfo?) {
         self.parent = parent
@@ -64,7 +65,7 @@ final class WatchdogRuntime: NSObject {
         let count = read(STDIN_FILENO, &bytes, bytes.count)
         if count > 0 {
             let commands = bytes.prefix(count)
-            if commands.contains(1) { lastHeartbeat = ProcessInfo.processInfo.systemUptime }
+            if commands.contains(1) { heartbeatLease.receive(now: ProcessInfo.processInfo.systemUptime) }
             // Recovery always wins when both requests arrive together.
             if commands.contains(2) { restore() }
             if commands.contains(3) && !pendingRestore { supervisor?.requestDisable() }
@@ -84,13 +85,15 @@ final class WatchdogRuntime: NSObject {
         if previousLid == true && lid == false {
             screensAwake = true
             systemAwake = true
+            resumed()
         }
+        if previousLid != lid { activityGeneration += 1 }
         previousLid = lid
         supervisor?.lidChanged(closed: lid)
-        if getppid() != parent || kill(parent, 0) != 0 || !pipeOpen || now - lastHeartbeat > 8 {
+        if getppid() != parent || kill(parent, 0) != 0 || !pipeOpen || heartbeatLease.expired(now: now) {
             restore()
         }
-        if let started = queryStarted, now - started > 4 { restore() }
+        if screensAwake && systemAwake, let started = queryStarted, now - started > 4 { restore() }
         // An unknown lid state fails closed. No WindowServer query or change
         // is necessary during clamshell/display/system sleep.
         if lid == false && screensAwake && systemAwake { query() }
@@ -101,27 +104,33 @@ final class WatchdogRuntime: NSObject {
         guard queryStarted == nil, !transaction.isRunning else { return }
         queryStarted = ProcessInfo.processInfo.systemUptime
         let generation = supervisor?.generation ?? 0
+        let activity = activityGeneration
         queries.read { [weak self] state, active in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.queryStarted = nil
+                guard activity == self.activityGeneration, self.screensAwake, self.systemAwake,
+                      DisplayEnvironment.lidClosed() == false else { self.tick(); return }
                 if self.supervisor == nil {
                     guard let state else { exit(69) }
                     self.protectedIDs = Set(state.externalDisplays.map(\.id))
                     self.supervisor = WatchdogSupervisor(snapshot: state, worker: self.transaction,
                         seed: self.seed, restored: { exit(0) })
-                    self.supervisor?.sessionChanged(active: self.sessionActive && active == true)
+                    self.sessionActive = active == true
+                    self.supervisor?.sessionChanged(active: self.sessionActive)
                     self.supervisor?.screensChanged(awake: self.screensAwake)
                     self.supervisor?.systemChanged(awake: self.systemAwake)
                     if self.pendingRestore { self.supervisor?.requestRestore() }
                     // A closed reply pipe must not crash a still-needed rescue
                     // process after its parent's startup deadline expires.
                     _ = Array("READY\n".utf8).withUnsafeBytes { Darwin.write(STDOUT_FILENO, $0.baseAddress, $0.count) }
-                } else if generation == self.supervisor?.generation && !self.transaction.isRunning {
-                    if let active, active != self.sessionActive {
-                        self.sessionActive = active
-                        self.supervisor?.sessionChanged(active: active)
-                        if active { self.screensAwake = true; self.systemAwake = true }
+                } else if generation == self.supervisor?.generation && !self.transaction.isRunning,
+                          self.screensAwake && self.systemAwake, DisplayEnvironment.lidClosed() == false {
+                    let available = active == true
+                    if available != self.sessionActive {
+                        self.sessionActive = available
+                        self.supervisor?.sessionChanged(active: available)
+                        if available { self.screensAwake = true; self.systemAwake = true; self.resumed() }
                         else { self.restore() }
                     }
                     self.supervisor?.observe(state)
@@ -133,6 +142,8 @@ final class WatchdogRuntime: NSObject {
     }
 
     func displayRemoved(_ id: UInt32) {
+        // Sleeping links may disappear temporarily; validate them on wake.
+        guard screensAwake, systemAwake else { return }
         if protectedIDs.contains(id) { restore(); supervisor?.externalRemoved() }
     }
 
@@ -143,10 +154,12 @@ final class WatchdogRuntime: NSObject {
             observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
+                    let waking = awake && !self.screensAwake
+                    if awake != self.screensAwake { self.activityGeneration += 1 }
                     self.screensAwake = awake
                     if awake { self.systemAwake = true }
+                    if waking { self.resumed() }
                     self.supervisor?.screensChanged(awake: awake)
-                    if !awake { self.restore() }
                     self.tick()
                 }
             })
@@ -156,18 +169,21 @@ final class WatchdogRuntime: NSObject {
             observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
+                    let waking = awake && !self.systemAwake
+                    if awake != self.systemAwake { self.activityGeneration += 1 }
                     self.systemAwake = awake
+                    self.heartbeatLease.systemChanged(awake: awake, now: ProcessInfo.processInfo.systemUptime)
                     if awake { self.screensAwake = true }
+                    if waking { self.resumed() }
                     self.supervisor?.systemChanged(awake: awake)
-                    if !awake { self.restore() }
                     self.tick()
                 }
             })
         }
-        for (name, active) in [(NSWorkspace.sessionDidResignActiveNotification, false),
-                               (NSWorkspace.sessionDidBecomeActiveNotification, true)] {
+        for name in [NSWorkspace.sessionDidResignActiveNotification,
+                     NSWorkspace.sessionDidBecomeActiveNotification] {
             observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.sessionChanged(active: active) }
+                MainActor.assumeIsolated { self?.consoleChanged() }
             })
         }
         let distributed = DistributedNotificationCenter.default()
@@ -177,15 +193,25 @@ final class WatchdogRuntime: NSObject {
                                 object: nil, suspensionBehavior: .deliverImmediately)
     }
 
-    private func sessionChanged(active: Bool) {
-        sessionActive = active
-        supervisor?.sessionChanged(active: active)
-        if active { screensAwake = true; systemAwake = true }
-        else { restore() }
+    private func resumed() {
+        let now = ProcessInfo.processInfo.systemUptime
+        heartbeatLease.systemChanged(awake: true, now: now)
+        // A read suspended by sleep is still the sole in-flight read. Grant it
+        // the normal deadline after wake, rather than declaring a sleep gap a hang.
+        if queryStarted != nil { queryStarted = now }
+    }
+
+    private func consoleChanged() {
+        let confirmed = DisplayEnvironment.sessionAvailable() ?? false
+        let returning = confirmed && !sessionActive
+        sessionActive = confirmed
+        supervisor?.sessionChanged(active: confirmed)
+        if returning { screensAwake = true; systemAwake = true; resumed() }
+        if !confirmed { restore() }
         tick()
     }
-    @objc private func locked() { sessionChanged(active: false) }
-    @objc private func unlocked() { sessionChanged(active: true) }
+    @objc private func locked() { consoleChanged() }
+    @objc private func unlocked() { consoleChanged() }
 }
 
 private let displayChanged: CGDisplayReconfigurationCallBack = { id, flags, context in

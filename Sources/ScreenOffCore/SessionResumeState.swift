@@ -15,6 +15,7 @@ struct SessionResumeState {
     mutating func setLidOpen(_ open: Bool, now: TimeInterval) {
         guard lidOpen != open else { return }
         lidOpen = open
+        if open { systemAwake = true; screensAwake = true }
         changed(now: now)
     }
 

@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import IOKit
+import Darwin
 
 enum DisplayEnvironment {
     /// This path does not contact WindowServer and remains usable when a
@@ -13,9 +14,23 @@ enum DisplayEnvironment {
                                               kCFAllocatorDefault, 0)?.takeRetainedValue() as? Bool
     }
 
+    /// A locked console still belongs to this user. Another user's console or
+    /// an unknown session cannot authorize disabling a display.
+    static func sessionAvailable() -> Bool? {
+        guard let state = CGSessionCopyCurrentDictionary() as? [String: Any] else { return nil }
+        return sessionAvailable(state, owner: getuid())
+    }
+
+    static func sessionAvailable(_ state: [String: Any], owner: uid_t) -> Bool {
+        guard let user = state[kCGSessionUserIDKey as String] as? NSNumber,
+              user.uint32Value == owner,
+              state[kCGSessionOnConsoleKey as String] as? Bool == true else { return false }
+        return true
+    }
+
     static func sessionActive() -> Bool? {
         guard let state = CGSessionCopyCurrentDictionary() as? [String: Any] else { return nil }
-        return !(state["CGSSessionScreenIsLocked"] as? Bool ?? false)
-            && (state[kCGSessionOnConsoleKey as String] as? Bool ?? false)
+        return sessionAvailable(state, owner: getuid())
+            && !(state["CGSSessionScreenIsLocked"] as? Bool ?? false)
     }
 }

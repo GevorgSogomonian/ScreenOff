@@ -14,6 +14,7 @@ mkdir -p "$BUILD/module-cache" "$APP/Contents/MacOS" "$APP/Contents/Resources"
 COMMON=(-swift-version 5 -O -target "$ARCH-apple-macos13.0" -module-cache-path "$BUILD/module-cache")
 xcrun swiftc "${COMMON[@]}" Sources/ScreenOffCore/*.swift Sources/ScreenOff/*.swift -o "$APP/Contents/MacOS/ScreenOff"
 xcrun swiftc "${COMMON[@]}" Sources/ScreenOffCore/*.swift Sources/ScreenOffWatchdog/*.swift -o "$APP/Contents/MacOS/ScreenOffWatchdog"
+xcrun swiftc "${COMMON[@]}" Sources/ScreenOffCore/DisplayRoleOverride.swift Sources/ScreenOffCore/DisplayPolicy.swift Sources/ScreenOffCore/BuiltInRecoveryTarget.swift Sources/ScreenOffDisplayRole/*.swift -o "$APP/Contents/MacOS/ScreenOffDisplayRole"
 xcrun swiftc -module-cache-path "$BUILD/module-cache" Scripts/MakeIcon.swift -o "$BUILD/make-icon"
 "$BUILD/make-icon" "$BUILD/AppIcon.iconset"
 iconutil -c icns "$BUILD/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
@@ -23,6 +24,7 @@ cp Resources/Installation.txt "$APP/Contents/Resources/Installation.txt"
 
 SIGN=(--force --sign "$IDENTITY")
 if [[ "$IDENTITY" != "-" ]]; then SIGN+=(--options runtime --timestamp); fi
+codesign "${SIGN[@]}" "$APP/Contents/MacOS/ScreenOffDisplayRole"
 codesign "${SIGN[@]}" "$APP/Contents/MacOS/ScreenOffWatchdog"
 codesign "${SIGN[@]}" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"

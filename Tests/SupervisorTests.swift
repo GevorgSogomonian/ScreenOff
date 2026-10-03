@@ -58,9 +58,9 @@ enum SupervisorTests {
             expect(worker.requests.count == 1 && !worker.requests[0].on, "supervised disable")
             worker.finish()
             supervisor.observe(state(on: false))
-            supervisor.sessionChanged(active: false) // Touch ID lock, still open.
+            supervisor.sessionChanged(active: false) // Console ownership lost, still open.
             supervisor.tick()
-            expect(worker.requests.last?.on == true, "lock starts restoration before lid closure")
+            expect(worker.requests.last?.on == true, "console loss starts restoration before lid closure")
             if restoreFinishedBeforeClosing {
                 worker.finish()
                 supervisor.observe(state())
@@ -104,7 +104,7 @@ enum SupervisorTests {
             let s = WatchdogSupervisor(snapshot: state(), worker: worker, clock: { now }, restored: {})
             s.requestDisable()
             s.sessionChanged(active: false)
-            expect(worker.cancellations == 1, "lock can cancel a disable before its API returns")
+            expect(worker.cancellations == 1, "console loss cancels a disable before its API returns")
             s.tick()
             expect(worker.requests.count == 1, "cancelled disable remains serialized until reaped")
             worker.finish(.cancelled)
@@ -151,7 +151,7 @@ enum SupervisorTests {
             for tick in 0..<100 { now = Double(tick) * 2; s.tick() }
             expect(worker.requests.isEmpty, "no configuration while \(sleepKind)")
         }
-        for unsafe in ["locked", "sleeping", "lid", "missing", "external", "mirroring"] {
+        for unsafe in ["inactive-console", "sleeping", "lid", "missing", "external", "mirroring"] {
             let worker = ControlledTransaction()
             var snapshot = state(external: unsafe != "external", present: unsafe != "missing")
             if unsafe == "mirroring" {
@@ -159,7 +159,7 @@ enum SupervisorTests {
                     online: true, active: true, mirrored: true)
             }
             let s = WatchdogSupervisor(snapshot: snapshot, worker: worker, restored: {})
-            if unsafe == "locked" { s.sessionChanged(active: false) }
+            if unsafe == "inactive-console" { s.sessionChanged(active: false) }
             if unsafe == "sleeping" { s.screensChanged(awake: false) }
             if unsafe == "lid" { s.lidChanged(closed: true) }
             s.requestDisable()
@@ -180,7 +180,7 @@ enum SupervisorTests {
             s.observe(state(on: false, id: 99))
             s.tick()
             expect(worker.requests.count == 2 && worker.requests.last?.lastKnownBuiltIn?.id == 99,
-                   "unlock rearms recovery and updates a newly discovered panel ID")
+                   "console return rearms recovery and updates a newly discovered panel ID")
         }
         do {
             var now: TimeInterval = 0
@@ -209,6 +209,95 @@ enum SupervisorTests {
             now = 1
             s.tick()
             expect(worker.requests.count == 1 && worker.requests[0].on, "recovery survives a worker launch failure")
+        }
+        // A lock keeps ownership of the same console; a completed disable
+        // survives display sleep and system sleep without any enable request.
+        for kind in ["display", "system"] {
+            var now: TimeInterval = 0
+            let worker = ControlledTransaction()
+            let s = WatchdogSupervisor(snapshot: state(), worker: worker, clock: { now }, restored: {})
+            s.requestDisable()
+            worker.finish()
+            s.observe(state(on: false))
+            s.sessionChanged(active: true) // Lock notification: ownership unchanged.
+            if kind == "display" { s.screensChanged(awake: false) }
+            else { s.systemChanged(awake: false) }
+            for tick in 1...38_400 { now = Double(tick) * 0.75; s.tick() }
+            expect(!s.recoveryRequested && worker.requests.count == 1,
+                   "confirmed disable stays off through locked eight-hour \(kind) sleep")
+            if kind == "display" { s.screensChanged(awake: true) }
+            else { s.systemChanged(awake: true) }
+            now += 1
+            s.observe(state(on: false))
+            s.tick()
+            expect(worker.requests.count == 1, "wake without panel reactivation performs no transaction")
+            s.observe(state()) // Simulate macOS reactivating the panel.
+            s.tick()
+            expect(worker.requests.count == 2 && worker.requests.last?.on == false && !s.recoveryRequested,
+                   "macOS reactivation is reapplied using the same protected lease")
+            for _ in 0..<10 { s.requestDisable(); s.tick() }
+            expect(worker.requests.count == 2, "duplicate reapply requests never overlap a child")
+            worker.finish()
+            s.observe(state(on: false))
+            s.tick()
+            expect(worker.requests.count == 2, "confirmed reapply does not spawn a transaction loop")
+            s.externalRemoved()
+            s.observe(state(on: false, external: false))
+            now += 1
+            s.tick()
+            expect(worker.requests.count == 3 && worker.requests.last?.on == true,
+                   "external unplug still restores while the owner console is locked")
+        }
+        do {
+            let worker = ControlledTransaction()
+            let s = WatchdogSupervisor(snapshot: state(), worker: worker, restored: {})
+            s.requestDisable()
+            worker.finish()
+            s.observe(state(on: false))
+            s.observe(state())
+            s.tick()
+            worker.finish() // An API success that never actually disables the panel.
+            s.observe(state())
+            s.tick()
+            expect(s.recoveryRequested && worker.requests.count == 2,
+                   "unverified reapply fails toward recovery instead of endlessly disabling")
+        }
+        do {
+            var now: TimeInterval = 0
+            let worker = ControlledTransaction()
+            let s = WatchdogSupervisor(snapshot: state(), worker: worker, clock: { now }, restored: {})
+            s.requestDisable()
+            s.systemChanged(awake: false)
+            expect(worker.cancellations == 1 && s.recoveryRequested,
+                   "sleep interrupts an unfinished disable with rollback responsibility")
+            worker.finish(.cancelled)
+            s.systemChanged(awake: true)
+            now = 1
+            s.tick()
+            expect(worker.requests.count == 2 && worker.requests.last?.on == true,
+                   "uncertain interrupted disable restores on wake")
+        }
+        do {
+            var now: TimeInterval = 0
+            let worker = ControlledTransaction()
+            let s = WatchdogSupervisor(snapshot: state(), worker: worker, clock: { now }, restored: {})
+            s.requestDisable()
+            worker.finish()
+            s.observe(state(on: false))
+            s.screensChanged(awake: false)
+            s.systemChanged(awake: false)
+            s.lidChanged(closed: true)
+            s.externalRemoved()
+            s.observe(state(on: false, lid: true, external: false, present: false))
+            for tick in 1...38_400 { now = Double(tick) * 0.75; s.tick() }
+            expect(worker.requests.count == 1 && s.recoveryRequested,
+                   "locked close-lid unplug waits without transactions throughout the night")
+            s.lidChanged(closed: false)
+            s.observe(state(on: false, external: false, present: false))
+            now += 1
+            s.tick()
+            expect(worker.requests.count == 2 && worker.requests.last?.on == true && worker.requests.last?.lastKnownBuiltIn?.id == 1,
+                   "lid opening alone restores the remembered panel after locked unplug")
         }
         print("PASS: \(checks) production supervisor checks, including locked clamshell unplug and eight-hour simulations")
     }
